@@ -91,11 +91,20 @@ class GromService : Service() {
             return Json.encode(runtime.auditTail(maxEntries.coerceIn(1, 200)))
         }
 
-        override fun restartAgent() = guard { runtime.restartAgent() }
+        override fun restartAgent() = guard {
+            requireSameSigner()
+            runtime.restartAgent()
+        }
 
-        override fun resetAgent() = guard { runtime.resetAgent() }
+        override fun resetAgent() = guard {
+            requireSameSigner()
+            runtime.resetAgent()
+        }
 
-        override fun rotateToken() = guard { runtime.rotateToken() }
+        override fun rotateToken() = guard {
+            requireSameSigner()
+            runtime.rotateToken()
+        }
     }
 
     /**

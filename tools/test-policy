@@ -85,9 +85,9 @@ check "boot restart is opt-in" \
 check "boot respects quarantine" \
   grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
 
-# 15. the IPC bind path checks signatures
-check "onBind applies the signature gate" \
-  bash -c "grep -q 'SignatureGate.isSameSigner' $MAIN/service/GromService.kt"
+# 15. every IPC transaction checks signatures (6 reads + 3 mutations + the helper)
+check "every IPC transaction applies the signature gate" \
+  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 7 ]"
 
 # 16. cleartext outbound traffic is not enabled
 check "no usesCleartextTraffic" \

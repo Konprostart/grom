@@ -76,6 +76,20 @@ when the user enabled it, and never when the agent is quarantined.
 "Done" here means the gate passes on this tree. Steps 8 and 9 were finished
 during the rebuild; they were the two open items at handoff.
 
+## Conformance results for this tree
+
+| Gate | Result |
+|---|---|
+| `:app:testServer29DebugUnitTest` | 140/140 |
+| `tools/test-policy` | 17/17 |
+| `tools/check-third-party` | 10/10 |
+| `tools/verify-ipc-signing` | 10/10 |
+| `:app:lintServer29Debug` | 0 errors, 4 warnings |
+| fresh clone of the pushed commit, built from scratch | pass |
+
+These numbers replace the handoff's 67/67, 45/45, 17/17, 17/17 because the
+requirement set was re-derived (`docs/RECOVERY.md`).
+
 ## What F1 still cannot claim
 
 F1 is **not** a working server. Three conditions are outside the repository:
