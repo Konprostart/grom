@@ -12,9 +12,12 @@ class RouterTest {
         var authorized = true
         var lastLimit = -1
         var rotateCalls = 0
+        var execStatus = 200
+        var execBody = ""
+        var lastArgs: String? = null
 
         override fun apiVersion(): Int = 1
-        override fun authorize(token: String?): Boolean = authorized && token != null
+        override fun authorize(candidate: String?): Boolean = authorized && candidate != null
         override fun health(): Map<String, Any?> = mapOf("api" to 1, "state" to "READY")
         override fun status(): Map<String, Any?> = mapOf("state" to "READY", "port" to 47001)
         override fun auditTail(limit: Int): Map<String, Any?> {
@@ -32,7 +35,11 @@ class RouterTest {
         override fun stopAgent(): Map<String, Any?> = mapOf("state" to "STOPPED")
         override fun restartAgent(): Map<String, Any?> = mapOf("state" to "STARTING")
         override fun resetAgent(): Map<String, Any?> = mapOf("state" to "STOPPED")
-        override fun exec(op: String, argsJson: String?): Map<String, Any?> = mapOf("op" to op)
+        override fun exec(op: String, argsJson: String?): HttpResponse {
+            lastArgs = argsJson
+            val body = execBody.ifEmpty { "{\"op\":\"$op\",\"ok\":true}" }
+            return HttpResponse(execStatus, body)
+        }
     }
 
     private fun request(
@@ -120,11 +127,35 @@ class RouterTest {
 
     @Test
     fun `exec with op is dispatched`() {
-        val response = router().handle(
+        val api = FakeApi()
+        val response = router(api).handle(
             request("POST", "/grom/v1/agent/exec", token = "good", body = "{\"op\":\"ping\"}")
         )
         assertEquals(200, response.status)
         assertTrue(response.body.contains("ping"))
+        assertEquals("{\"op\":\"ping\"}", api.lastArgs)
+    }
+
+    @Test
+    fun `exec passes the agent status through instead of faking success`() {
+        val api = FakeApi().apply {
+            execStatus = 503
+            execBody = "{\"ok\":false,\"code\":\"STORAGE_UNAVAILABLE\"}"
+        }
+        val response = router(api).handle(
+            request("POST", "/grom/v1/agent/exec", token = "good", body = "{\"op\":\"kv.get\"}")
+        )
+        assertEquals(503, response.status)
+        assertTrue(response.body.contains("STORAGE_UNAVAILABLE"))
+    }
+
+    @Test
+    fun `exec response carries the api header`() {
+        val response = router().handle(
+            request("POST", "/grom/v1/agent/exec", token = "good", body = "{\"op\":\"ping\"}")
+        )
+        assertEquals("1", response.headers["X-Grom-Api"])
+        assertTrue(response.headers["Content-Type"]!!.startsWith("application/json"))
     }
 
     @Test

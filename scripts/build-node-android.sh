@@ -1,69 +1,324 @@
 #!/usr/bin/env bash
-# build-node-android.sh — produce the arm64 Node runtime that Grom supervises.
+# build-node-android.sh — obtain, verify and install the arm64 Node runtime that
+# Grom supervises.
 #
-# The build host here has an x86_64-only NDK on an aarch64 machine, so Node
-# cannot be compiled locally (blocker B1). This script therefore prints the
-# exact Docker invocation instead of pretending to build.
+# Modes:
+#   (none)            diagnose this host and print the install instructions
+#   --status          readiness report for humans and logs; always exits 0
+#   --check           exit 1 unless the assets hold a valid aarch64 libnode.so
+#                     and agent/grom-agent.js exists (for CI, once B1 is cleared)
+#   --verify          same checks, with the full report
+#   --install DIR     install a prebuilt runtime from DIR into the assets dir
+#   --docker          print the reproducible cross-build recipe
+#   --q8              print the on-device Q8 (node:sqlite) probe
 #
-# Output (after a successful run elsewhere):
-#   app/src/main/assets/node/libnode.so     64-bit arm64 executable
-#   app/src/main/assets/node/grom-agent.js  the agent entry point
-#
-# Both are copied into app-private storage on first launch (D24).
+# Grom itself never downloads a runtime (S1-R003, S3-R037). Everything here is
+# an explicit operator action; no mode except --docker's printed recipe
+# performs a network request.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-NODE_VERSION="${NODE_VERSION:-22.14.0}"
-OUT_DIR="${OUT_DIR:-$PWD/node-out}"
+REPO="$PWD"
+# Only the operator-supplied binary lives here; grom-agent.js is packaged
+# straight from agent/ by Gradle (see app/build.gradle.kts) so there is exactly
+# one copy of the source.
+ASSET_DIR="${ASSET_DIR:-$REPO/app/src/main/assets/node}"
+NODE_VERSION="${NODE_VERSION:-24.19.0}"   # node:sqlite is stable here; 22.14+ also works
+OUT_DIR="${OUT_DIR:-$REPO/node-out}"
+BINARY_NAME="libnode.so"
+SCRIPT_NAME="grom-agent.js"
 
-cat <<EOF
-Grom agent runtime build
-========================
-target : linux-arm64 (Android, API 29+, static)
-node   : v${NODE_VERSION}
-output : ${OUT_DIR}
+HOST_ARCH="$(uname -m)"
+EM_AARCH64=183   # e_machine for 64-bit ARM; no heuristics, the header is read
 
-The local NDK is $(ls "${ANDROID_NDK_HOME:-/root/android-sdk/ndk}" 2>/dev/null | head -1) and is
-x86_64-only on this host, so this machine cannot link an arm64 binary.
-Run the following on an x86_64 host with Docker:
+say()  { printf '%s\n' "$*"; }
+ok()   { printf '  ok    %s\n' "$*"; }
+warn() { printf '  warn  %s\n' "$*" >&2; }
+bad()  { printf '  FAIL  %s\n' "$*" >&2; }
+
+# --------------------------------------------------------------------- probing
+
+ndk_paths() {
+  { [ -n "${ANDROID_NDK_HOME:-}" ] && printf '%s\n' "$ANDROID_NDK_HOME"
+    [ -n "${ANDROID_HOME:-}" ] && printf '%s\n' "$ANDROID_HOME"/ndk/*
+    printf '%s\n' /root/android-sdk/ndk/* /opt/android-sdk/ndk/*
+  } 2>/dev/null | sort -u
+}
+
+# A prebuilt NDK toolchain is usable only if its clang already executes here.
+# The common failure is linux-x86_64 prebuilts on an aarch64 host: the files
+# exist, so a naive `ls` check would lie about being able to build.
+find_runnable_ndk() {
+  local ndk prebuilt clang
+  while IFS= read -r ndk; do
+    [ -d "$ndk" ] || continue
+    for prebuilt in "$ndk"/toolchains/llvm/prebuilt/*; do
+      clang="$prebuilt/bin/clang"
+      [ -x "$clang" ] || continue
+      if "$clang" --version >/dev/null 2>&1; then
+        printf '%s\n' "$ndk"
+        return 0
+      fi
+    done
+  done < <(ndk_paths)
+  return 1
+}
+
+elf_machine() {
+  # Decimal ELF e_machine, or nothing when the file is not ELF.
+  local file="$1"
+  [ -f "$file" ] || return 0
+  python3 - "$file" <<'PY' 2>/dev/null || true
+import struct, sys
+with open(sys.argv[1], "rb") as fh:
+    head = fh.read(20)
+if len(head) < 20 or head[:4] != b"\x7fELF":
+    sys.exit(0)
+end = "<" if head[5] == 1 else ">"
+print(struct.unpack(end + "H", head[18:20])[0])
+PY
+}
+
+elf_description() {
+  case "$1" in
+    183) echo "aarch64" ;;
+    62)  echo "x86_64" ;;
+    40)  echo "arm (32-bit)" ;;
+    3)   echo "i386" ;;
+    "")  echo "not an ELF file" ;;
+    *)   echo "ELF machine $1" ;;
+  esac
+}
+
+glibc_linked() {
+  # A glibc aarch64 binary passes the e_machine check but cannot run on
+  # Android (bionic). Catch it at install time instead of on the phone.
+  local file="$1"
+  [ -f "$file" ] || return 1
+  python3 - "$file" <<'PY' 2>/dev/null
+import sys
+data = open(sys.argv[1], "rb").read(65536)
+sys.exit(0 if b"ld-linux" in data else 1)
+PY
+}
+
+libnode_present() { [ -f "$ASSET_DIR/$BINARY_NAME" ]; }
+agent_present()   { [ -f "$REPO/agent/$SCRIPT_NAME" ]; }
+
+docker_recipe() {
+  cat <<EOF
+Cross-build Node v${NODE_VERSION} for Android arm64 (run on an x86_64 host):
 
   mkdir -p "${OUT_DIR}"
-  docker run --rm \\
+  docker run --rm --platform linux/amd64 \\
     -v "${OUT_DIR}:/out" \\
-    -v "\$PWD/scripts/node-build:/build" \\
     node:22-bookworm \\
     bash -lc '
       set -e
-      apt-get update && apt-get install -y --no-install-recommends \\
-        curl xz-utils ca-certificates
-      cd /build
+      apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates
       curl -fsSLO https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz
       tar -xf node-v${NODE_VERSION}.tar.xz
       cd node-v${NODE_VERSION}
+      # --fully-static keeps the binary self-contained: no Termux prefix, no
+      # glibc, only bionic's static startup on the phone.
       ./configure --dest-cpu=arm64 --dest-os=linux --fully-static \\
                   --without-npm --without-corepack --openssl-no-asm
       make -j"\$(nproc)"
-      cp out/Release/node /out/libnode.so
+      cp out/Release/node /out/${BINARY_NAME}
     '
 
-Then:
+Then on this machine:
 
-  cp "${OUT_DIR}/libnode.so"   app/src/main/assets/node/libnode.so
-  cp agent/grom-agent.js       app/src/main/assets/node/grom-agent.js
-  gradle :app:assembleServer29Debug
+  scripts/build-node-android.sh --install "${OUT_DIR}"
 
-Q8 — still open
-----------------
-Before relying on the runtime, answer on a real device:
+Q8 caveat: a fully static build still has node:sqlite, because the module is
+built into the binary rather than loaded as a shared library. The recipe is the
+one that can answer Q8 on the device.
 
-  adb shell run-as app.grom.server \\
-    files/node/libnode.so -e "require('node:sqlite'); console.log('sqlite ok')"
-
-If that prints "sqlite ok", Q8 is closed. If it throws, Grom must not depend on
-node:sqlite and the agent storage layer needs a different backend.
-
-This script intentionally does NOT download a prebuilt runtime: Grom never
-initiates outbound traffic (S1-R003) and a runtime must be an explicit operator
-action, not a silent download.
+Faster alternative for answering Q8 only (no Grom build):
+install Termux on the phone, \`pkg install nodejs-lts\`, then run the --q8 probe
+against that node. If Termux's Node exposes node:sqlite, a Grom build of the
+same major version will too.
 EOF
+}
+
+q8_probe() {
+  cat <<EOF
+Q8 — is node:sqlite available in a runtime a phone can actually run?
+
+1. Fastest (Termux, no Grom install):
+     pkg install nodejs-lts
+     node -e "const s=require('node:sqlite');new s.DatabaseSync(':memory:').exec('create table t(a)');console.log('Q8 OK',process.version)"
+
+2. Against the installed runtime inside the app sandbox (needs adb):
+     adb shell run-as app.grom.server \\
+       files/grom/node/libnode.so -e \\
+       "const s=require('node:sqlite');new s.DatabaseSync(':memory:').exec('create table t(a)');console.log('Q8 OK',process.version)"
+
+   (The app installs the runtime into files/grom/node on first start.)
+
+3. Ask Grom itself once the agent is running:
+     curl -s -H "Authorization: Bearer \$(cat grom-token)" \\
+       http://127.0.0.1:<port>/grom/v1/agent/exec -d '{"op":"status"}'
+     -> "sqlite":{"available":true,"backend":"node:sqlite"} means Q8 is closed.
+
+Evidence from the dev host of this repo (arm64 Linux):
+  Node v24.19.0: node:sqlite loads and runs SQL with no flag.
+  Node v22.14.0: same, with an ExperimentalWarning; earlier 22.x needed
+  --experimental-sqlite, which Grom's argv does not pass (S3-R005).
+  On a runtime without the module, kv.* answers 503 STORAGE_UNAVAILABLE —
+  truthful, but not useful, which is why v${NODE_VERSION} is pinned above.
+EOF
+}
+
+status_block() {
+  say "Grom agent runtime status"
+  say "========================"
+  say "host        : $HOST_ARCH ($(uname -sr))"
+  say "asset dir   : $ASSET_DIR"
+  say "node target : v$NODE_VERSION"
+  say ""
+  say "Runtime assets"
+
+  if libnode_present; then
+    local machine size
+    machine="$(elf_machine "$ASSET_DIR/$BINARY_NAME")"
+    size="$(du -h "$ASSET_DIR/$BINARY_NAME" | cut -f1)"
+    if [ "$machine" = "$EM_AARCH64" ]; then
+      if glibc_linked "$ASSET_DIR/$BINARY_NAME"; then
+        bad "$BINARY_NAME ($size, aarch64) is glibc-linked and will not run on Android"
+      else
+        ok "$BINARY_NAME ($size, aarch64)"
+      fi
+    else
+      bad "$BINARY_NAME ($size, $(elf_description "$machine") — must be aarch64)"
+    fi
+  else
+    bad "$BINARY_NAME missing (Blocker B1)"
+  fi
+
+  if agent_present; then
+    ok "$SCRIPT_NAME source: agent/$SCRIPT_NAME ($(du -h "$REPO/agent/$SCRIPT_NAME" | cut -f1)), packaged into the APK as node/$SCRIPT_NAME"
+  else
+    bad "$SCRIPT_NAME missing from agent/"
+  fi
+
+  say ""
+  say "Build host"
+  local runnable
+  if runnable="$(find_runnable_ndk)"; then
+    ok "NDK toolchain executes here: $runnable"
+    ok "an arm64 cross-build is possible on this host (memory permitting)"
+  else
+    local prebuilts
+    prebuilts="$(ls -d /root/android-sdk/ndk/*/toolchains/llvm/prebuilt/* 2>/dev/null | xargs -r -n1 basename | sort -u | tr '\n' ' ')"
+    bad "no NDK toolchain on this host can execute (prebuilts: ${prebuilts:-none}) on $HOST_ARCH"
+    say "        -> Node cannot be cross-built locally; use --docker or --install"
+  fi
+
+  if command -v docker >/dev/null 2>&1; then
+    ok "docker present (scripts/build-node-android.sh --docker)"
+  else
+    warn "docker not installed on this host"
+  fi
+
+  if command -v adb >/dev/null 2>&1; then
+    local devices
+    devices="$(adb devices 2>/dev/null | awk 'NR>1 && $2=="device"' | wc -l)"
+    if [ "$devices" -gt 0 ]; then
+      ok "adb sees $devices device(s): Blocker B2 can be closed"
+    else
+      warn "adb present but no device attached (Blocker B2)"
+    fi
+  else
+    warn "adb not installed (Blocker B2: nothing has run on a device)"
+  fi
+
+  say ""
+  say "Q8 (node:sqlite): see scripts/build-node-android.sh --q8"
+}
+
+# ----------------------------------------------------------------------- modes
+
+mode="${1:---diagnose}"
+case "$mode" in
+  --status|--check|--verify|--install|--docker|--q8) shift || true ;;
+  -*) echo "unknown option: $mode (try --status)" >&2; exit 2 ;;
+  *)  echo "unknown argument: $mode" >&2; exit 2 ;;
+esac
+
+case "$mode" in
+  --docker) docker_recipe; exit 0 ;;
+  --q8)     q8_probe; exit 0 ;;
+esac
+
+if [ "$mode" = "--install" ]; then
+  src="${1:-}"
+  [ -n "$src" ] || { echo "--install needs a source directory" >&2; exit 2; }
+  [ -d "$src" ] || { echo "not a directory: $src" >&2; exit 2; }
+  mkdir -p "$ASSET_DIR"
+
+  if [ -f "$src/$BINARY_NAME" ]; then
+    cp -f "$src/$BINARY_NAME" "$ASSET_DIR/$BINARY_NAME"
+  elif [ -f "$src/node" ]; then
+    cp -f "$src/node" "$ASSET_DIR/$BINARY_NAME"
+  else
+    echo "no $BINARY_NAME (or node) in $src" >&2
+    exit 1
+  fi
+  chmod 755 "$ASSET_DIR/$BINARY_NAME"
+
+  if [ -f "$src/$SCRIPT_NAME" ]; then
+    # Keep one canonical copy: refresh agent/ rather than shadowing it in assets.
+    cp -f "$src/$SCRIPT_NAME" "$REPO/agent/$SCRIPT_NAME"
+  fi
+
+  machine="$(elf_machine "$ASSET_DIR/$BINARY_NAME")"
+  if [ "$machine" != "$EM_AARCH64" ]; then
+    rm -f "$ASSET_DIR/$BINARY_NAME"
+    echo "refusing to install: $BINARY_NAME is $(elf_description "$machine"), not aarch64" >&2
+    exit 1
+  fi
+  if glibc_linked "$ASSET_DIR/$BINARY_NAME"; then
+    rm -f "$ASSET_DIR/$BINARY_NAME"
+    echo "refusing to install: aarch64 but glibc-linked; Android needs a bionic or static build" >&2
+    exit 1
+  fi
+  echo "installed $BINARY_NAME ($(elf_description "$machine"), $(du -h "$ASSET_DIR/$BINARY_NAME" | cut -f1))"
+  exit 0
+fi
+
+case "$mode" in
+  --diagnose|--status)
+    status_block
+    if [ "$mode" = "--diagnose" ]; then
+      say ""
+      say "Next steps"
+      say "  1. scripts/build-node-android.sh --docker              # recipe for an x86_64 host"
+      say "  2. scripts/build-node-android.sh --install <dir>       # libnode.so -> assets, agent stays in agent/"
+      say "  3. gradle :app:assembleServer29Debug"
+      say "  4. on a device: scripts/build-node-android.sh --q8"
+    fi
+    ;;
+
+  --check|--verify)
+    status_block
+    say ""
+    failure=0
+    machine="$(elf_machine "$ASSET_DIR/$BINARY_NAME" 2>/dev/null || true)"
+    if [ "$machine" != "$EM_AARCH64" ] || glibc_linked "$ASSET_DIR/$BINARY_NAME"; then
+      bad "runtime is not installable: $BINARY_NAME is $(elf_description "${machine:-}")"
+      failure=1
+    else
+      ok "runtime is installable: aarch64 $BINARY_NAME present"
+    fi
+    agent_present || { bad "$SCRIPT_NAME missing from agent/"; failure=1; }
+    if [ "$failure" -ne 0 ]; then
+      say ""
+      say "Expected until Blocker B1 is cleared. The app still builds and reports"
+      say "MISSING_RUNTIME at runtime; only the agent stays unavailable."
+      exit 1
+    fi
+    ;;
+esac

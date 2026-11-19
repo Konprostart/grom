@@ -26,19 +26,26 @@ grom/
 
 ## Status
 
-F1, the walking skeleton, is **complete**: all nine steps of
-`docs/F1-implementation-plan.md` pass their gates on this tree.
+F1, the walking skeleton, is **complete**, and the agent runtime is now real on
+the server side: `agent/grom-agent.js` implements the protocol, the app installs
+it from its own APK, and `POST /grom/v1/agent/exec` is proxied to the agent
+instead of being answered with a fabricated `ok`.
 
-It is **not yet a working server**, and it says so:
+It is **still not a working server on a phone**, and it says so:
 
 | Blocker | Consequence |
 |---|---|
 | **B1** `libnode.so` for arm64 is absent | agent endpoints answer `503 MISSING_RUNTIME` |
 | **B2** nothing has run on a device (no `adb` here) | boot cycle and vendor task-killers unverified |
-| **B3** Q8: does arm64 Node expose `node:sqlite`? | storage backend undecided |
+| **B3** Q8: does an arm64 Node build expose `node:sqlite`? | storage backend unverified on-device |
 
 The app builds, installs, and reports `MISSING_RUNTIME` honestly. That is the
-designed behaviour (D24, D31), not a bug.
+designed behaviour (D24, D31), not a bug. `docs/RUNTIME.md` records exactly what
+is measured, what is assumed, and how to close each blocker.
+
+`tools/run-gates` runs the full gate set locally in dependency order. A matching
+GitHub Actions workflow is prepared at `.github/workflows/ci.yml`; it needs a
+token with `workflow` scope to be pushed (see the note in the commit).
 
 ## Build
 
@@ -56,11 +63,13 @@ The server role is `server29` (minSdk 29). The peripheral role is
 ## Conformance
 
 ```bash
+tools/run-gates                           # all of the below, in order
 gradle :app:testServer29DebugUnitTest     # JVM policy/logic tests
 gradle :app:lint                          # lint, warnings are not failures
 tools/check-third-party                   # dependency ledger matches the build
 tools/test-policy                         # 17 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
+tools/test-agent-runtime                  # grom-agent.js protocol + degradation
 tools/verify-ipc-signing                  # C-008, needs the three APKs
 ```
 
@@ -88,15 +97,28 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/audit/v
 
 ## The agent runtime
 
-Grom does not download anything (D16). Install the runtime yourself:
+Grom does not download anything (D16). The agent script (`agent/grom-agent.js`)
+is packaged into the APK and copied into app-private storage on first start; the
+Node binary is supplied by the operator:
 
 ```
-<app files>/grom/node/libnode.so        the runtime, executable
-<app files>/grom/node/grom-agent.js     the agent entry point
+<app files>/grom/node/libnode.so        the runtime, executable (operator)
+<app files>/grom/node/grom-agent.js     the agent entry point (from the APK)
 ```
 
-`scripts/build-node-android.sh` prints the Docker line that produces a static
-arm64 Node binary, and the one-liner that answers Q8 on a real device.
+```bash
+scripts/build-node-android.sh --status     # is this host able to build/run?
+scripts/build-node-android.sh --docker     # reproducible arm64 recipe
+scripts/build-node-android.sh --install ~/node-out
+scripts/build-node-android.sh --q8         # the on-device node:sqlite probe
+```
+
+The agent binds its own ephemeral loopback port and announces it with
+`GROM_AGENT_READY <pid> <port>` after `GROM_READY <pid>`. Ops are `ping`,
+`echo`, `status`, `kv.get`, `kv.put`; if `node:sqlite` is missing, `kv.*`
+answers `503 STORAGE_UNAVAILABLE` rather than pretending to persist.
+
+Details and measured evidence: `docs/RUNTIME.md`.
 
 ## Security model, in one paragraph
 

@@ -199,3 +199,35 @@ launcher, which are thin.
 only when (a) `libnode.so` exists for arm64, (b) Grom has run on a real device
 through a boot cycle and a crash cycle, and (c) Q8 (`node:sqlite` on aarch64) is
 answered. Until then the README and the UI both say `MISSING_RUNTIME`.
+
+## D32 — The agent announces a private control port on stdout
+**ACCEPTED.** `GROM_READY <pid>` (S3-R011) is unchanged. Immediately after it,
+the agent prints a second, additive line:
+
+```
+GROM_AGENT_READY <pid> <port>
+```
+
+The port is an ephemeral `127.0.0.1` listener owned by the agent; the `--port`
+argument still belongs to the Kotlin HTTP facade and is never bound by the
+agent. The `<pid>` must equal the child the supervisor spawned, exactly like
+S3-R013, or the line is treated as a crash. An unknown line would otherwise be
+discarded by `HealthGate`, so the extension cannot break older supervisors.
+
+*Why not a second fixed port:* a fixed port collides with other apps and cannot
+be inferred from the facade port. *Why not a unix socket:* it needs a path,
+which would have to appear in argv or in the runtime directory, and the
+ephemeral port needs neither.
+
+*Enforced by:* `AgentChannelTest`, `tools/test-agent-runtime`.
+
+## D33 — `exec` is proxied, never synthesized
+**ACCEPTED.** `POST /grom/v1/agent/exec` forwards the request to the agent and
+returns the agent's status and body unchanged. If the agent cannot be reached
+the answer is `502 AGENT_UNAVAILABLE`; if it has not announced a control port
+the answer is `503 AGENT_NOT_READY`. The server never returns `{"ok":true}` for
+an op it did not execute, and a `503 STORAGE_UNAVAILABLE` from the agent reaches
+the caller as `503`.
+
+*Enforced by:* `RouterTest` (status passthrough), `AgentClientTest`,
+`ServerRuntime.exec`.

@@ -1,0 +1,10 @@
+{
+  "name": "grom-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Grom local Node agent runtime (node:http + optional node:sqlite, no dependencies)",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

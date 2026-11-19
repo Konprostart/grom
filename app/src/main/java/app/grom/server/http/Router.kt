@@ -23,7 +23,7 @@ class ApiException(
  */
 interface GromApi {
     fun apiVersion(): Int
-    fun authorize(token: String?): Boolean
+    fun authorize(candidate: String?): Boolean
     fun health(): Map<String, Any?>
     fun status(): Map<String, Any?>
     fun auditTail(limit: Int): Map<String, Any?>
@@ -33,7 +33,13 @@ interface GromApi {
     fun stopAgent(): Map<String, Any?>
     fun restartAgent(): Map<String, Any?>
     fun resetAgent(): Map<String, Any?>
-    fun exec(op: String, argsJson: String?): Map<String, Any?>
+
+    /**
+     * Executes a whitelisted op on the agent. The agent's own status and body
+     * are returned unchanged: the server must never manufacture an `ok` that
+     * the agent did not produce (S2-R025).
+     */
+    fun exec(op: String, argsJson: String?): HttpResponse
 }
 
 /**
@@ -101,7 +107,14 @@ class Router(
         Action.AGENT_STOP -> ok(api.stopAgent())
         Action.AGENT_RESTART -> ok(api.restartAgent())
         Action.AGENT_RESET -> ok(api.resetAgent())
-        Action.AGENT_EXEC -> ok(api.exec(requireOp(request.body), request.body))
+        Action.AGENT_EXEC -> {
+            val response = api.exec(requireOp(request.body), request.body)
+            response.copy(
+                headers = MAP_LIMITS +
+                    ("Content-Type" to "application/json; charset=utf-8") +
+                    response.headers
+            )
+        }
     }
 
     private fun limitOf(request: HttpRequest): Int {

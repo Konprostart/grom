@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# run-gates — every conformance gate, in dependency order, on one machine.
+#
+# CI runs the same set (.github/workflows/ci.yml); this script exists so a
+# laptop can reproduce a red build without reading the workflow.
+#
+# Order matters: verify-ipc-signing inspects built APKs, so the build runs
+# first. Set GRADLE_ARGS to add flags (e.g. "--no-daemon").
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+GRADLE_BIN="${GRADLE_BIN:-gradle}"
+GRADLE_ARGS="${GRADLE_ARGS:-}"
+FAIL=0
+PASS=0
+
+step() {
+  local name="$1"; shift
+  echo
+  echo "== $name =="
+  if "$@"; then
+    PASS=$((PASS + 1))
+    echo "-> $name: OK"
+  else
+    FAIL=$((FAIL + 1))
+    echo "-> $name: FAILED" >&2
+  fi
+}
+
+gradle_run() {
+  # shellcheck disable=SC2086
+  $GRADLE_BIN --console=plain $GRADLE_ARGS "$@"
+}
+
+step "build (APKs for the signing gate)" gradle_run \
+  :app:assembleServer29Debug \
+  :app:assemblePeripheral26Debug \
+  :testapps:samecert:assembleDebug \
+  :testapps:foreigncert:assembleDebug
+
+step "JVM tests (both flavours)" gradle_run \
+  :app:testServer29DebugUnitTest \
+  :app:testPeripheral26DebugUnitTest
+
+step "static policy (17 checks)" ./tools/test-policy
+step "third-party ledger" ./tools/check-third-party
+step "IPC signing (C-008)" ./tools/verify-ipc-signing
+step "agent secrets (stdin, not argv)" ./tools/test-agent
+step "agent runtime protocol (node)" ./tools/test-agent-runtime
+step "Android lint" gradle_run :app:lint
+
+echo
+if [ "$FAIL" -ne 0 ]; then
+  echo "run-gates: FAILED ($PASS passed, $FAIL failed)" >&2
+  exit 1
+fi
+echo "run-gates: OK ($PASS gates)"

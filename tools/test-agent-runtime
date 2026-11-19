@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# test-agent-runtime — the Node agent must be loopback-only, must announce
+# readiness on stdout, must never print the bearer token, and must degrade
+# honestly (503 STORAGE_UNAVAILABLE) when node:sqlite is absent.
+#
+# Two layers:
+#   static  — the source binds 127.0.0.1:0 and keeps secrets out of output;
+#   dynamic — node --test agent/test/*.test.js spawns the real CLI with a
+#             stdin config and exercises readiness, auth, /exec and the 503 path.
+#
+# See S3-R004…S3-R019, D11, D12, D25, D26.
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+AGENT_DIR="agent"
+AGENT="$AGENT_DIR/grom-agent.js"
+TEST="$AGENT_DIR/test/agent.test.js"
+PKG="$AGENT_DIR/package.json"
+
+FAIL=0
+PASS=0
+
+check() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    PASS=$((PASS + 1))
+    echo "  ok   $name"
+  else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL $name" >&2
+  fi
+}
+
+# The inverse of check: passes when the command fails.
+check_absent() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    FAIL=$((FAIL + 1))
+    echo "  FAIL $name" >&2
+  else
+    PASS=$((PASS + 1))
+    echo "  ok   $name"
+  fi
+}
+
+echo "== test-agent-runtime =="
+
+# --- files and licence --------------------------------------------------------
+check "agent entry point exists" test -f "$AGENT"
+check "test entry point exists" test -f "$TEST"
+check "agent carries an SPDX header" \
+  grep -q 'SPDX-License-Identifier: Apache-2.0' "$AGENT"
+
+# --- bind policy --------------------------------------------------------------
+check "binds loopback 127.0.0.1" grep -q "host: '127.0.0.1'" "$AGENT"
+check "binds an ephemeral port (0)" grep -q 'port: 0' "$AGENT"
+LISTEN_CALLS=$(grep -c 'server\.listen' "$AGENT" 2>/dev/null || true)
+check "there is exactly one listener" test "$LISTEN_CALLS" -eq 1
+check_absent "no wildcard bind literal" grep -Fq '0.0.0.0' "$AGENT"
+
+# --- readiness and fatal protocol --------------------------------------------
+check "prints GROM_READY" grep -q 'GROM_READY' "$AGENT"
+check "prints GROM_AGENT_READY" grep -q 'GROM_AGENT_READY' "$AGENT"
+check "prints GROM_FATAL for bad stdin" grep -q 'GROM_FATAL' "$AGENT"
+
+# --- bounded input ------------------------------------------------------------
+check "stdin cap is 16 KiB" grep -q 'MAX_STDIN_BYTES = 16 \* 1024' "$AGENT"
+check "body cap is 64 KiB" grep -q 'MAX_BODY_BYTES = 64 \* 1024' "$AGENT"
+
+# --- sqlite degradation -------------------------------------------------------
+check "the sqlite loader is injectable" grep -q 'sqliteLoader' "$AGENT"
+check "missing node:sqlite answers STORAGE_UNAVAILABLE" \
+  grep -q 'STORAGE_UNAVAILABLE' "$AGENT"
+check "node:sqlite is loaded defensively" grep -q "require('node:sqlite')" "$AGENT"
+check "kv ops are not faked without sqlite" \
+  grep -q "node:sqlite is not available in this runtime" "$AGENT"
+
+# --- process supervision ------------------------------------------------------
+check "parent poll runs every 1s" grep -q 'PARENT_POLL_MS = 1_000' "$AGENT"
+check "parent liveness uses signal 0" grep -q 'process.kill(parentPid, 0)' "$AGENT"
+check "SIGTERM is handled" grep -q "process.once('SIGTERM'" "$AGENT"
+check "SIGINT is handled" grep -q "process.once('SIGINT'" "$AGENT"
+
+# --- secrets never reach an output channel -----------------------------------
+# stdout is reserved for readiness/fatal lines; these greps fail if a write
+# call interpolates the token or the config object.
+check_absent "stdout writes carry no token/config" \
+  grep -En 'stdout\.write\([^)]*(token|config\.)' "$AGENT"
+check_absent "stderr writes carry no token/config" \
+  grep -En 'stderr\.write\([^)]*(token|config\.)' "$AGENT"
+check_absent "no log call receives the token" \
+  grep -En 'log\([^)]*token' "$AGENT"
+check_absent "the config object is never serialized wholesale" \
+  grep -q 'JSON.stringify(config' "$AGENT"
+check_absent "status has no token field" \
+  grep -Eq 'token: config\.token|token: token' "$AGENT"
+
+# --- no network client / no dependencies -------------------------------------
+check_absent "no outbound http(s) client" \
+  grep -Eq 'https?\.(request|get)\(|fetch\(' "$AGENT"
+check_absent "no declared dependencies" grep -q '"dependencies"' "$PKG"
+check_absent "no node_modules directory" test -e "$AGENT_DIR/node_modules"
+check "package is private" grep -q '"private": true' "$PKG"
+
+# --- the test suite covers the contract --------------------------------------
+check "tests use node:test" grep -q "node:test" "$TEST"
+check "tests spawn the real CLI" grep -q "child_process" "$TEST"
+check "tests inject sqlite absence" grep -q 'sqliteLoader' "$TEST"
+check "tests assert 503 STORAGE_UNAVAILABLE" grep -q 'STORAGE_UNAVAILABLE' "$TEST"
+check "tests assert no token leak" grep -q 'assertNoToken' "$TEST"
+
+# --- dynamic ------------------------------------------------------------------
+# Node's test runner does not expand a bare directory argument, so the glob is
+# the portable invocation on both 22.x and 24.x.
+echo "  ..   running node --test agent/test/*.test.js"
+if node --test agent/test/*.test.js >/tmp/grom-test-agent-runtime.log 2>&1; then
+  PASS=$((PASS + 1))
+  echo "  ok   node --test agent/test/*.test.js"
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL node --test agent/test/*.test.js (see /tmp/grom-test-agent-runtime.log)" >&2
+fi
+
+TOTAL=$((PASS + FAIL))
+echo
+if [ "$FAIL" -ne 0 ]; then
+  echo "test-agent-runtime: FAILED ($PASS/$TOTAL)" >&2
+  exit 1
+fi
+echo "test-agent-runtime: OK ($PASS/$TOTAL)"

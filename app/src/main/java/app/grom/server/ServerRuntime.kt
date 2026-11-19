@@ -2,7 +2,10 @@
 package app.grom.server
 
 import android.content.Context
+import app.grom.server.agent.AgentChannel
+import app.grom.server.agent.AgentClient
 import app.grom.server.agent.AgentLauncher
+import app.grom.server.agent.AssetRuntime
 import app.grom.server.agent.NodeAgentProcess
 import app.grom.server.audit.AuditStore
 import app.grom.server.core.AgentState
@@ -12,7 +15,7 @@ import app.grom.server.core.SupervisorPolicy
 import app.grom.server.core.Token
 import app.grom.server.http.ApiException
 import app.grom.server.http.GromApi
-import app.grom.server.http.Json
+import app.grom.server.http.HttpResponse
 import app.grom.server.http.LoopbackHttpServer
 import app.grom.server.http.Router
 import app.grom.server.service.GromPrefs
@@ -41,6 +44,7 @@ class ServerRuntime(
     private val store = SecureStore(rootDir)
     private val auditStore = AuditStore(File(rootDir, "audit"))
     private val policy = SupervisorPolicy()
+    private val agentClient = AgentClient()
     private val scheduler: ScheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "grom-supervisor").apply { isDaemon = true }
@@ -69,6 +73,10 @@ class ServerRuntime(
     @Volatile
     private var lastError: String? = null
 
+    /** The ephemeral loopback port announced by the agent, or -1. */
+    @Volatile
+    private var agentPort: Int = -1
+
     val port: Int get() = GromPrefs.port(context)
 
     fun isRunning(): Boolean = running
@@ -81,6 +89,19 @@ class ServerRuntime(
             rootDir.mkdirs()
             token = store.loadOrCreate()
             startedAt = System.currentTimeMillis()
+
+            // The agent script ships in the APK; the operator may also have put
+            // libnode.so there. Copy both into app-private storage (D24). A
+            // failure here is reported, not fatal: MISSING_RUNTIME is a valid
+            // state (S3-R035).
+            val runtime = AssetRuntime.install(context)
+            if (runtime.installed.isNotEmpty()) {
+                log("runtime installed: ${runtime.installed.joinToString(",")}")
+            }
+            if (runtime.rejected.isNotEmpty()) {
+                log("runtime rejected: ${runtime.rejected.joinToString(",")}")
+            }
+            runtime.error?.let { log("runtime install error: $it") }
 
             if (GromPrefs.isQuarantined(context)) {
                 policy.onFatal(GromPrefs.quarantineReason(context) ?: "persisted quarantine")
@@ -109,6 +130,7 @@ class ServerRuntime(
             httpServer = null
             agent?.stop()
             agent = null
+            agentPort = -1
             policy.onStopped()
             scheduler.shutdownNow()
         }
@@ -156,6 +178,7 @@ class ServerRuntime(
                 "enabled" to GromPrefs.startOnBoot(context),
                 "runtimeDir" to runtimeDir.absolutePath,
                 "missing" to missing,
+                "agentPort" to agentPort,
                 "lastError" to lastError
             )
         }
@@ -221,6 +244,7 @@ class ServerRuntime(
         synchronized(lock) {
             agent?.stop()
             agent = null
+            agentPort = -1
             policy.onStopped()
             backoffUntil = 0L
             audited("agent.stop", "")
@@ -236,6 +260,7 @@ class ServerRuntime(
             }
             agent?.stop()
             agent = null
+            agentPort = -1
             audited("agent.restart", "")
             startAgentLocked()
             return status()
@@ -246,6 +271,7 @@ class ServerRuntime(
         synchronized(lock) {
             agent?.stop()
             agent = null
+            agentPort = -1
             policy.reset()
             backoffUntil = 0L
             GromPrefs.setQuarantined(context, null)
@@ -254,7 +280,9 @@ class ServerRuntime(
         }
     }
 
-    override fun exec(op: String, argsJson: String?): Map<String, Any?> {
+    override fun exec(op: String, argsJson: String?): HttpResponse {
+        val port: Int
+        val bearer: String
         synchronized(lock) {
             requireRuntimeOrThrow()
             if (policy.isQuarantined()) {
@@ -266,8 +294,29 @@ class ServerRuntime(
             if (op !in ALLOWED_OPS) {
                 throw ApiException(400, "UNKNOWN_OP", "op is not whitelisted: $op")
             }
-            audited("agent.exec", "op=$op")
-            return mapOf("op" to op, "ok" to true)
+            port = agentPort
+            if (port <= 0) {
+                // The agent said READY but has not announced a control port.
+                // Refusing is the only truthful answer; inventing "ok" is not.
+                throw ApiException(503, "AGENT_NOT_READY", "agent has not announced its control port")
+            }
+            bearer = token
+        }
+
+        // The socket call happens outside the lock: a slow agent must not stall
+        // the supervisor or the other endpoints.
+        val body = argsJson?.takeIf { it.isNotBlank() } ?: "{\"op\":\"$op\"}"
+        return when (val result = agentClient.exec(port, bearer, body)) {
+            is AgentClient.Result.Answered -> {
+                synchronized(lock) { audited("agent.exec", "op=$op status=${result.status}") }
+                HttpResponse(result.status, result.body)
+            }
+            is AgentClient.Result.Unavailable -> {
+                synchronized(lock) {
+                    safeAudit("agent.exec.failed", "op=$op reason=${result.reason}")
+                }
+                throw ApiException(502, "AGENT_UNAVAILABLE", "agent did not answer: ${result.reason}")
+            }
         }
     }
 
@@ -311,6 +360,7 @@ class ServerRuntime(
         val process = ensureAgent()
         val state = policy.startRequested(true)
         if (state != AgentState.STARTING) return
+        agentPort = -1
         val launched = process.launch(port, token)
         if (!launched) {
             handleCrash("launch failed")
@@ -324,6 +374,7 @@ class ServerRuntime(
         val state = policy.onCrash(cause)
         agent?.stop()
         agent = null
+        agentPort = -1
         val detail = "cause=${cause} crashes=${policy.crashCount()}"
         safeAudit("agent.crash", detail)
         if (state == AgentState.QUARANTINED) {
@@ -351,6 +402,22 @@ class ServerRuntime(
 
     private fun onAgentLine(rawLine: String) {
         val line = redactor().redact(rawLine)
+
+        // The channel line carries the agent's control port. It is additive to
+        // GROM_READY, and its pid must match the child we spawned.
+        AgentChannel.observe(rawLine)?.let { ready ->
+            synchronized(lock) {
+                val expected = agent?.pid ?: -1L
+                if (AgentChannel.matches(ready, expected)) {
+                    agentPort = ready.port
+                    safeAudit("agent.channel", "port=${ready.port}")
+                } else {
+                    handleCrash("agent channel pid mismatch")
+                }
+            }
+            return
+        }
+
         when (val observation = HealthGate.observe(rawLine)) {
             is HealthGate.Observation.Ready -> {
                 synchronized(lock) {
@@ -420,6 +487,8 @@ class ServerRuntime(
     companion object {
         private const val TICK_MS = 1_000L
         private val LIVE_STATES = setOf(AgentState.STARTING, AgentState.READY)
-        private val ALLOWED_OPS = setOf("ping", "echo")
+
+        /** Single source of truth, shared with the agent (see AgentChannel). */
+        private val ALLOWED_OPS = AgentChannel.OPS
     }
 }

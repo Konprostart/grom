@@ -16,5 +16,9 @@ captures/
 *.log
 grom-token.txt
 
+# Operator-supplied Node runtime (large, and never downloaded by Grom).
+app/src/main/assets/node/libnode.so
+node-out/
+
 # Test-only keystores ARE committed on purpose (see docs/000-decisions.md D4).
 !keys/*.jks

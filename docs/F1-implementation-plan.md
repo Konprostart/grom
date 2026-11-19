@@ -80,11 +80,13 @@ during the rebuild; they were the two open items at handoff.
 
 | Gate | Result |
 |---|---|
-| `:app:testServer29DebugUnitTest` | 140/140 |
+| `:app:testServer29DebugUnitTest` | 163/163 |
+| `:app:testPeripheral26DebugUnitTest` | 163/163 |
 | `tools/test-policy` | 17/17 |
 | `tools/check-third-party` | 10/10 |
 | `tools/verify-ipc-signing` | 10/10 |
-| `:app:lintServer29Debug` | 0 errors, 4 warnings |
+| `tools/test-agent-runtime` | 35/35 |
+| `:app:lint` | 0 errors |
 | fresh clone of the pushed commit, built from scratch | pass |
 
 These numbers replace the handoff's 67/67, 45/45, 17/17, 17/17 because the
@@ -97,8 +99,11 @@ F1 is **not** a working server. Three conditions are outside the repository:
 1. `libnode.so` for arm64 does not exist here. See `scripts/build-node-android.sh`.
 2. Nothing has run on a device: no `adb` in the build environment. The boot
    cycle and the vendor task-killer behaviour are unverified.
-3. Q8 is open: does an arm64 Node build expose `node:sqlite`? One
-   `node -e "require('node:sqlite')"` on the phone answers it.
+3. Q8 is open **on a device**: `node:sqlite` works on Node 24.19.0 on the dev
+   host, but whether an Android/bionic arm64 build exposes it has not been
+   measured. One `node -e "require('node:sqlite')"` on the phone answers it;
+   the agent degrades to `503 STORAGE_UNAVAILABLE` instead of faking success
+   until then. See `docs/RUNTIME.md`.
 
 Until (1) and (2) close, `POST /grom/v1/agent/*` returns `503 MISSING_RUNTIME`
 and the UI says the same. See D31.
