@@ -70,8 +70,12 @@ check "no money/ledger vocabulary" \
   bash -c "! grep -rniE 'payment|ledger|settlement|\bbalance\b|invoice' $MAIN --include='*.kt'"
 
 # 11. every Kotlin source carries an SPDX header
+# Depend on grep's *output*, not on find's exit status: GNU findutils
+# versions disagree about whether a failing -exec command makes find fail, and
+# the CI runner's version turned this check red on a tree with all headers
+# present. An empty list is the pass condition.
 check "SPDX headers on all Kotlin sources" \
-  bash -c "! find app sdk -name '*.kt' -not -path '*/build/*' -exec grep -L 'SPDX-License-Identifier: Apache-2.0' {} +"
+  bash -c "[ -z \"\$(find app sdk -name '*.kt' -not -path '*/build/*' -exec grep -L 'SPDX-License-Identifier: Apache-2.0' {} +)\" ]"
 
 # 12. the repository licence is Apache-2.0
 check "LICENSE is Apache-2.0" \
