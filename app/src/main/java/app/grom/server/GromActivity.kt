@@ -146,12 +146,8 @@ class GromActivity : Activity() {
     }
 
     private fun startServer() {
-        val intent = Intent(this, app.grom.server.service.GromService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+        // minSdk is 26 for both flavours, so startForegroundService is safe.
+        startForegroundService(Intent(this, app.grom.server.service.GromService::class.java))
         handler.postDelayed({ render() }, 500)
     }
 

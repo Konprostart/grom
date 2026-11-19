@@ -10,14 +10,14 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/ic_grom"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Grom">
 
         <activity
             android:name=".GromActivity"
-            android:exported="true"
-            android:label="@string/app_name">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -50,11 +50,10 @@ class GromService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? {
-        val callingUid = Binder.getCallingUid()
-        if (!SignatureGate.isSameSigner(packageManager, Process.myUid(), callingUid)) {
-            Log.w(TAG, "rejected IPC bind from uid=$callingUid")
-            return null
-        }
+        // The caller identity is not reliable on the main thread, so the
+        // signature check happens per transaction in the Stub below. The
+        // signature-level permission on the service declaration is the first
+        // gate; this is the second.
         if (!runtime.isRunning()) {
             try {
                 runtime.start()
@@ -72,20 +71,43 @@ class GromService : Service() {
     }
 
     private val binder: IGromServer.Stub = object : IGromServer.Stub() {
-        override fun apiVersion(): Int = runtime.apiVersion()
+        override fun apiVersion(): Int {
+            requireSameSigner()
+            return runtime.apiVersion()
+        }
 
-        override fun healthJson(): String = Json.encode(runtime.health())
+        override fun healthJson(): String {
+            requireSameSigner()
+            return Json.encode(runtime.health())
+        }
 
-        override fun statusJson(): String = Json.encode(runtime.status())
+        override fun statusJson(): String {
+            requireSameSigner()
+            return Json.encode(runtime.status())
+        }
 
-        override fun auditTail(maxEntries: Int): String =
-            Json.encode(runtime.auditTail(maxEntries.coerceIn(1, 200)))
+        override fun auditTail(maxEntries: Int): String {
+            requireSameSigner()
+            return Json.encode(runtime.auditTail(maxEntries.coerceIn(1, 200)))
+        }
 
         override fun restartAgent() = guard { runtime.restartAgent() }
 
         override fun resetAgent() = guard { runtime.resetAgent() }
 
         override fun rotateToken() = guard { runtime.rotateToken() }
+    }
+
+    /**
+     * Runs on a binder thread, where Binder.getCallingUid() is authoritative.
+     * A foreign signature never reaches the server state.
+     */
+    private fun requireSameSigner() {
+        val callingUid = Binder.getCallingUid()
+        if (!SignatureGate.isSameSigner(packageManager, Process.myUid(), callingUid)) {
+            Log.w(TAG, "rejected IPC transaction from uid=$callingUid")
+            throw SecurityException("GROM_E_FORBIDDEN: caller signature mismatch")
+        }
     }
 
     /** Maps server failures to the stable client-visible exception (S4-R016). */
@@ -100,24 +122,16 @@ class GromService : Service() {
     private fun startForegroundSafely() {
         if (foregroundStarted) return
         val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW)
-            )
-        }
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW)
+        )
         val open = PendingIntent.getActivity(
             this,
             0,
             Intent(this, GromActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        val notification = builder
+        val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
             .setSmallIcon(android.R.drawable.stat_sys_download_done)

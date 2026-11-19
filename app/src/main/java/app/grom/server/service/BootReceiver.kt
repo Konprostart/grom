@@ -4,7 +4,6 @@ package app.grom.server.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 
 /**
@@ -27,11 +26,8 @@ class BootReceiver : BroadcastReceiver() {
         }
         val service = Intent(context, GromService::class.java)
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(service)
-            } else {
-                context.startService(service)
-            }
+            // minSdk is 26 for both flavours, so startForegroundService is safe.
+            context.startForegroundService(service)
             Log.i(TAG, "boot: server start requested")
         } catch (failure: Exception) {
             Log.w(TAG, "boot: start refused by platform")

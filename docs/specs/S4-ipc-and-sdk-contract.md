@@ -34,19 +34,29 @@ enforces this; Grom MUST NOT rely on it alone (see S4-R008).
 ## 3. Signature verification
 
 ### S4-R007
-`GromService.onBind` MUST verify the caller before returning a Binder.
+Every `IGromServer` transaction MUST verify the caller before touching any
+server state.
 
 ### S4-R008
-Verification compares signatures by UID:
+Verification compares signatures by UID, on the binder thread:
 `PackageManager.checkSignatures(Process.myUid(), Binder.getCallingUid())` must
-equal `SIGNATURE_MATCH`. On mismatch, `onBind` returns `null`.
+equal `SIGNATURE_MATCH`. On mismatch the call throws `SecurityException` with a
+`GROM_E_FORBIDDEN` message and no state is read or written.
+
+The check lives in the transaction rather than in `onBind` because `onBind` may
+run outside a binder transaction, where `Binder.getCallingUid()` is not the
+caller's identity (see S4-R009).
 
 ### S4-R009
 Verification MUST NOT depend on resolving the caller's package name, so that
-package-visibility restrictions on API 30+ cannot weaken the check.
+package-visibility restrictions on API 30+ cannot weaken the check. It MUST NOT
+read `Binder.getCallingUid()` on a thread that is not handling a binder
+transaction.
 
 ### S4-R010
-A rejected bind MUST be logged locally with the calling UID.
+A rejected transaction MUST be logged locally with the calling UID. The
+`signature` protection on the service declaration (S4-R005) is the first gate,
+so a foreign signature normally fails to bind at all and never reaches S4-R008.
 
 ## 4. Interface
 
