@@ -1,0 +1,120 @@
+name: CI
+
+# Every push and pull request must prove the same five gates the project
+# documents: JVM tests, policy, third-party ledger, IPC signing, and lint.
+# The APKs are built first because verify-ipc-signing inspects real artifacts.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Gradle memory settings come from the committed gradle.properties so that the
+# laptop and CI builds share one profile.
+
+jobs:
+  android:
+    name: Android build, tests, gates and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK platform 36 and build-tools 35.0.0
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          echo "ANDROID_BUILD_TOOLS=${ANDROID_SDK_ROOT}/build-tools/35.0.0" >> "$GITHUB_ENV"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Build both role flavours and the C-008 test apps
+        run: |
+          gradle --no-daemon --stacktrace \
+            :app:assembleServer29Debug \
+            :app:assemblePeripheral26Debug \
+            :testapps:samecert:assembleDebug \
+            :testapps:foreigncert:assembleDebug
+
+      - name: JVM tests (server29 and peripheral26)
+        run: |
+          gradle --no-daemon --stacktrace \
+            :app:testServer29DebugUnitTest \
+            :app:testPeripheral26DebugUnitTest
+
+      - name: Policy gates (third-party ledger, static policy, IPC signing)
+        run: |
+          tools/check-third-party
+          tools/test-policy
+          tools/verify-ipc-signing
+
+      - name: Lint
+        run: gradle --no-daemon --stacktrace :app:lint
+
+      - name: Publish test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-*.html
+          if-no-files-found: warn
+
+      - name: Runtime readiness (informational)
+        run: scripts/build-node-android.sh --status
+
+      - name: Publish APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: grom-apks
+          path: |
+            app/build/outputs/apk/server29/debug/*.apk
+            app/build/outputs/apk/peripheral26/debug/*.apk
+            testapps/*/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  agent-runtime:
+    name: Agent runtime (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the pinned runtime; 24 is the current LTS with node:sqlite
+        # enabled by default. The agent must behave correctly on both.
+        node: ["22", "24"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Agent protocol tests and static gate
+        run: ./tools/test-agent-runtime
