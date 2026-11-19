@@ -176,7 +176,7 @@ class ServerRuntime(
                 "quarantineReason" to policy.quarantineReason,
                 "port" to port,
                 "enabled" to GromPrefs.startOnBoot(context),
-                "runtimeDir" to runtimeDir.absolutePath,
+                "runtimeDir" to runtime().binaryDirectory.absolutePath,
                 "missing" to missing,
                 "agentPort" to agentPort,
                 "lastError" to lastError
@@ -445,7 +445,26 @@ class ServerRuntime(
 
     // ------------------------------------------------------------------- helpers
 
-    private fun runtime(): AgentLauncher.RuntimeFiles = AgentLauncher.RuntimeFiles(runtimeDir)
+    /**
+     * D34: the executable is taken from the APK's native library dir, because
+     * Android denies `execve()` of files in app-private storage for apps
+     * targeting API 29+. The JavaScript entry point is a data file and stays in
+     * [runtimeDir]; a binary shipped under `assets/` (legacy operator path, see
+     * [AssetRuntime]) is used only when jniLibs supplied none.
+     */
+    private fun runtime(): AgentLauncher.RuntimeFiles {
+        val nativeDir = context.applicationInfo.nativeLibraryDir?.let { File(it) }
+        val nativeBinary = nativeDir?.let { File(it, AgentLauncher.BINARY_NAME) }
+        return if (nativeDir != null && nativeBinary != null && nativeBinary.isFile) {
+            AgentLauncher.RuntimeFiles(
+                directory = runtimeDir,
+                binaryDirectory = nativeDir,
+                libraryDirectory = nativeDir
+            )
+        } else {
+            AgentLauncher.RuntimeFiles(runtimeDir)
+        }
+    }
 
     private fun requireRuntimeOrThrow() {
         val missing = runtime().missingFile()

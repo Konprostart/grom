@@ -94,16 +94,22 @@ requirement set was re-derived (`docs/RECOVERY.md`).
 
 ## What F1 still cannot claim
 
-F1 is **not** a working server. Three conditions are outside the repository:
+F1 was **not** a working server. Three conditions sat outside the repository; one
+has since been closed:
 
-1. `libnode.so` for arm64 does not exist here. See `scripts/build-node-android.sh`.
+1. `libnode.so` for arm64 — **closed as a build problem.** The binary still is not
+   committed (it is a 91 MB build input), but it is now produced and verified by
+   one pinned command: `scripts/fetch-node-android.sh`. The assembled runtime
+   executes through the real bionic linker on this Android-kernel host, and
+   `scripts/build-node-android.sh --install` packages it into `jniLibs` (D34,
+   D35). See `docs/RUNTIME.md`.
 2. Nothing has run on a device: no `adb` in the build environment. The boot
-   cycle and the vendor task-killer behaviour are unverified.
-3. Q8 is open **on a device**: `node:sqlite` works on Node 24.19.0 on the dev
-   host, but whether an Android/bionic arm64 build exposes it has not been
-   measured. One `node -e "require('node:sqlite')"` on the phone answers it;
-   the agent degrades to `503 STORAGE_UNAVAILABLE` instead of faking success
-   until then. See `docs/RUNTIME.md`.
+   cycle and the vendor task-killer behaviour are unverified. **Still open.**
+3. Q8 — **closed.** `node:sqlite` works on the pinned bionic arm64 runtime
+   (Node v24.22.3): `--verify` prints `Q8 closed: … sqlite=7`, and all ten agent
+   tests pass on that runtime. What remains is repeating the same probe on the
+   phone for the record, which needs `adb`.
 
-Until (1) and (2) close, `POST /grom/v1/agent/*` returns `503 MISSING_RUNTIME`
-and the UI says the same. See D31.
+Until (2) closes, the on-device behaviour of the supervisor is unknown, but the
+runtime is no longer the reason: install it and `POST /grom/v1/agent/*` returns
+`503 MISSING_RUNTIME` only while the binary is genuinely absent. See D31, D34.

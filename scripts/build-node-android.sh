@@ -5,12 +5,16 @@
 # Modes:
 #   (none)            diagnose this host and print the install instructions
 #   --status          readiness report for humans and logs; always exits 0
-#   --check           exit 1 unless the assets hold a valid aarch64 libnode.so
-#                     and agent/grom-agent.js exists (for CI, once B1 is cleared)
+#   --check           exit 1 unless a valid aarch64 libnode.so is installed
 #   --verify          same checks, with the full report
-#   --install DIR     install a prebuilt runtime from DIR into the assets dir
+#   --install DIR     install a prebuilt runtime from DIR into jniLibs/arm64-v8a
+#                     (D34: an executable must live in the APK's native library
+#                     dir; exec from app-private storage is denied on API 29+)
 #   --docker          print the reproducible cross-build recipe
-#   --q8              print the on-device Q8 (node:sqlite) probe
+#   --q8              print the Q8 (node:sqlite) result and the probe commands
+#
+# The quickest way to produce DIR: scripts/fetch-node-android.sh — pinned
+# packages, normalised library names, and verification by execution.
 #
 # Grom itself never downloads a runtime (S1-R003, S3-R037). Everything here is
 # an explicit operator action; no mode except --docker's printed recipe
@@ -20,11 +24,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REPO="$PWD"
-# Only the operator-supplied binary lives here; grom-agent.js is packaged
-# straight from agent/ by Gradle (see app/build.gradle.kts) so there is exactly
-# one copy of the source.
+# Where the runtime is executed from (D34). Android denies execve() of files in
+# app-private storage for apps targeting API 29+, so the binary is packaged as a
+# native library and run from ApplicationInfo.nativeLibraryDir.
+JNI_DIR="${JNI_DIR:-$REPO/app/src/main/jniLibs/arm64-v8a}"
+# Legacy operator path: a binary dropped into assets is copied to files/node on
+# first start. Keep it working, but jniLibs is the supported location.
 ASSET_DIR="${ASSET_DIR:-$REPO/app/src/main/assets/node}"
-NODE_VERSION="${NODE_VERSION:-24.19.0}"   # node:sqlite is stable here; 22.14+ also works
+NODE_VERSION="${NODE_VERSION:-24.22.3}"   # verified on bionic/arm64 with node:sqlite
 OUT_DIR="${OUT_DIR:-$REPO/node-out}"
 BINARY_NAME="libnode.so"
 SCRIPT_NAME="grom-agent.js"
@@ -103,12 +110,24 @@ sys.exit(0 if b"ld-linux" in data else 1)
 PY
 }
 
-libnode_present() { [ -f "$ASSET_DIR/$BINARY_NAME" ]; }
+libnode_present() { [ -f "$JNI_DIR/$BINARY_NAME" ] || [ -f "$ASSET_DIR/$BINARY_NAME" ]; }
 agent_present()   { [ -f "$REPO/agent/$SCRIPT_NAME" ]; }
+
+# The runtime an operator would install: jniLibs wins over the legacy asset.
+libnode_path() {
+  if [ -f "$JNI_DIR/$BINARY_NAME" ]; then printf '%s\n' "$JNI_DIR/$BINARY_NAME"
+  else printf '%s\n' "$ASSET_DIR/$BINARY_NAME"; fi
+}
 
 docker_recipe() {
   cat <<EOF
-Cross-build Node v${NODE_VERSION} for Android arm64 (run on an x86_64 host):
+DEFAULT PATH — no cross-build needed, and it answers Q8:
+
+  scripts/fetch-node-android.sh            # pinned bionic aarch64 packages
+  scripts/fetch-node-android.sh --verify   # executes it: version + node:sqlite
+  scripts/build-node-android.sh --install  # into app/src/main/jniLibs/arm64-v8a
+
+Build from source instead (x86_64 host + docker; ~2 GB RAM for V8):
 
   mkdir -p "${OUT_DIR}"
   docker run --rm --platform linux/amd64 \\
@@ -136,10 +155,9 @@ Q8 caveat: a fully static build still has node:sqlite, because the module is
 built into the binary rather than loaded as a shared library. The recipe is the
 one that can answer Q8 on the device.
 
-Faster alternative for answering Q8 only (no Grom build):
-install Termux on the phone, \`pkg install nodejs-lts\`, then run the --q8 probe
-against that node. If Termux's Node exposes node:sqlite, a Grom build of the
-same major version will too.
+Not sure whether your runtime has the module? Run:
+
+  scripts/build-node-android.sh --q8
 EOF
 }
 
@@ -147,28 +165,37 @@ q8_probe() {
   cat <<EOF
 Q8 — is node:sqlite available in a runtime a phone can actually run?
 
-1. Fastest (Termux, no Grom install):
-     pkg install nodejs-lts
-     node -e "const s=require('node:sqlite');new s.DatabaseSync(':memory:').exec('create table t(a)');console.log('Q8 OK',process.version)"
+ANSWER: yes, on the pinned runtime (Node v${NODE_VERSION}, bionic aarch64).
+Proof, executable on any host with the Android linker present:
 
-2. Against the installed runtime inside the app sandbox (needs adb):
-     adb shell run-as app.grom.server \\
-       files/grom/node/libnode.so -e \\
-       "const s=require('node:sqlite');new s.DatabaseSync(':memory:').exec('create table t(a)');console.log('Q8 OK',process.version)"
+  scripts/fetch-node-android.sh --verify
+  -> ok    executes through /system/bin/linker64: v${NODE_VERSION}
+  -> ok    Q8 closed: Q8 v${NODE_VERSION} sqlite=7
 
-   (The app installs the runtime into files/grom/node on first start.)
-
-3. Ask Grom itself once the agent is running:
-     curl -s -H "Authorization: Bearer \$(cat grom-token)" \\
-       http://127.0.0.1:<port>/grom/v1/agent/exec -d '{"op":"status"}'
-     -> "sqlite":{"available":true,"backend":"node:sqlite"} means Q8 is closed.
-
-Evidence from the dev host of this repo (arm64 Linux):
-  Node v24.19.0: node:sqlite loads and runs SQL with no flag.
-  Node v22.14.0: same, with an ExperimentalWarning; earlier 22.x needed
+Measured on this repo's dev host (Android 15 kernel, aarch64, bionic):
+  Node v${NODE_VERSION} (Termux bionic build): node:sqlite loads and runs SQL
+  with no flag, and the whole agent suite passes on it (10/10).
+  Node v24.19.0 (glibc host build): same.
+  Node v22.14.0: same, with an ExperimentalWarning; some older 22.x need
   --experimental-sqlite, which Grom's argv does not pass (S3-R005).
-  On a runtime without the module, kv.* answers 503 STORAGE_UNAVAILABLE —
-  truthful, but not useful, which is why v${NODE_VERSION} is pinned above.
+
+Re-check on the phone, against the exact installed binary (needs adb):
+
+  adb shell run-as app.grom.server \\
+    /data/app/*/app.grom.server*/lib/arm64/libnode.so -e \\
+    "const s=require('node:sqlite');new s.DatabaseSync(':memory:').exec('create table t(a)');console.log('Q8 OK',process.version)"
+
+  (nativeLibraryDir is readable through \`run-as\`; the interpreter line is
+  /system/bin/linker64, so no extra environment is needed.)
+
+Ask Grom itself once the agent is running:
+
+  curl -s -H "Authorization: Bearer \$(cat grom-token)" \\
+    http://127.0.0.1:<port>/grom/v1/agent/exec -d '{"op":"status"}'
+  -> "sqlite":{"available":true,"backend":"node:sqlite"} means Q8 is closed.
+
+On a runtime without the module, kv.* still answers 503 STORAGE_UNAVAILABLE:
+truthful, but not useful, which is why v${NODE_VERSION} is pinned above.
 EOF
 }
 
@@ -182,20 +209,31 @@ status_block() {
   say "Runtime assets"
 
   if libnode_present; then
-    local machine size
-    machine="$(elf_machine "$ASSET_DIR/$BINARY_NAME")"
-    size="$(du -h "$ASSET_DIR/$BINARY_NAME" | cut -f1)"
+    local machine size path deps
+    path="$(libnode_path)"
+    machine="$(elf_machine "$path")"
+    size="$(du -h "$path" | cut -f1)"
     if [ "$machine" = "$EM_AARCH64" ]; then
-      if glibc_linked "$ASSET_DIR/$BINARY_NAME"; then
+      if glibc_linked "$path"; then
         bad "$BINARY_NAME ($size, aarch64) is glibc-linked and will not run on Android"
       else
-        ok "$BINARY_NAME ($size, aarch64)"
+        ok "$BINARY_NAME ($size, aarch64, bionic) at ${path#"$REPO"/}"
+        if [ "$path" = "$JNI_DIR/$BINARY_NAME" ]; then
+          deps="$(find "$JNI_DIR" -maxdepth 1 -name 'lib*.so' ! -name "$BINARY_NAME" | wc -l)"
+          if [ "$deps" -gt 0 ]; then
+            ok "$deps co-located libraries in jniLibs (libssl, libcrypto, libicu, …)"
+          else
+            say "  info  a static build needs no libraries beside the binary"
+          fi
+        else
+          warn "installed under assets/: still works, but jniLibs is the D34 location"
+        fi
       fi
     else
       bad "$BINARY_NAME ($size, $(elf_description "$machine") — must be aarch64)"
     fi
   else
-    bad "$BINARY_NAME missing (Blocker B1)"
+    bad "$BINARY_NAME missing (Blocker B1) — run scripts/fetch-node-android.sh"
   fi
 
   if agent_present; then
@@ -257,35 +295,51 @@ if [ "$mode" = "--install" ]; then
   src="${1:-}"
   [ -n "$src" ] || { echo "--install needs a source directory" >&2; exit 2; }
   [ -d "$src" ] || { echo "not a directory: $src" >&2; exit 2; }
-  mkdir -p "$ASSET_DIR"
+  mkdir -p "$JNI_DIR"
 
   if [ -f "$src/$BINARY_NAME" ]; then
-    cp -f "$src/$BINARY_NAME" "$ASSET_DIR/$BINARY_NAME"
+    :
   elif [ -f "$src/node" ]; then
-    cp -f "$src/node" "$ASSET_DIR/$BINARY_NAME"
+    cp -f "$src/node" "$src/$BINARY_NAME"
   else
     echo "no $BINARY_NAME (or node) in $src" >&2
     exit 1
   fi
-  chmod 755 "$ASSET_DIR/$BINARY_NAME"
+
+  machine="$(elf_machine "$src/$BINARY_NAME")"
+  if [ "$machine" != "$EM_AARCH64" ]; then
+    echo "refusing to install: $BINARY_NAME is $(elf_description "$machine"), not aarch64" >&2
+    exit 1
+  fi
+  if glibc_linked "$src/$BINARY_NAME"; then
+    echo "refusing to install: aarch64 but glibc-linked; Android needs a bionic or static build" >&2
+    exit 1
+  fi
+
+  # Dynamic builds carry dependencies; they must sit beside the binary, because
+  # Android only lets an app execute binaries from the native library dir (D34).
+  installed=0
+  for lib in "$src"/lib*.so; do
+    [ -f "$lib" ] || continue
+    case "$(basename "$lib")" in
+      "$BINARY_NAME") continue ;;
+    esac
+    cp -f "$lib" "$JNI_DIR/"
+    chmod 644 "$JNI_DIR/$(basename "$lib")"
+    installed=$((installed + 1))
+  done
+
+  cp -f "$src/$BINARY_NAME" "$JNI_DIR/$BINARY_NAME"
+  chmod 755 "$JNI_DIR/$BINARY_NAME"
 
   if [ -f "$src/$SCRIPT_NAME" ]; then
     # Keep one canonical copy: refresh agent/ rather than shadowing it in assets.
     cp -f "$src/$SCRIPT_NAME" "$REPO/agent/$SCRIPT_NAME"
   fi
 
-  machine="$(elf_machine "$ASSET_DIR/$BINARY_NAME")"
-  if [ "$machine" != "$EM_AARCH64" ]; then
-    rm -f "$ASSET_DIR/$BINARY_NAME"
-    echo "refusing to install: $BINARY_NAME is $(elf_description "$machine"), not aarch64" >&2
-    exit 1
-  fi
-  if glibc_linked "$ASSET_DIR/$BINARY_NAME"; then
-    rm -f "$ASSET_DIR/$BINARY_NAME"
-    echo "refusing to install: aarch64 but glibc-linked; Android needs a bionic or static build" >&2
-    exit 1
-  fi
-  echo "installed $BINARY_NAME ($(elf_description "$machine"), $(du -h "$ASSET_DIR/$BINARY_NAME" | cut -f1))"
+  echo "installed $BINARY_NAME ($(elf_description "$machine"), $(du -h "$JNI_DIR/$BINARY_NAME" | cut -f1)) into ${JNI_DIR#"$REPO"/}"
+  [ "$installed" -gt 0 ] && echo "installed $installed shared libraries beside it"
+  echo "note: jniLibs files are build outputs and stay out of git (see .gitignore)"
   exit 0
 fi
 
@@ -295,8 +349,8 @@ case "$mode" in
     if [ "$mode" = "--diagnose" ]; then
       say ""
       say "Next steps"
-      say "  1. scripts/build-node-android.sh --docker              # recipe for an x86_64 host"
-      say "  2. scripts/build-node-android.sh --install <dir>       # libnode.so -> assets, agent stays in agent/"
+      say "  1. scripts/fetch-node-android.sh                        # pinned, verifies by execution"
+      say "  2. scripts/build-node-android.sh --install node-out/runtime"
       say "  3. gradle :app:assembleServer29Debug"
       say "  4. on a device: scripts/build-node-android.sh --q8"
     fi
@@ -306,18 +360,20 @@ case "$mode" in
     status_block
     say ""
     failure=0
-    machine="$(elf_machine "$ASSET_DIR/$BINARY_NAME" 2>/dev/null || true)"
-    if [ "$machine" != "$EM_AARCH64" ] || glibc_linked "$ASSET_DIR/$BINARY_NAME"; then
+    installed_path="$(libnode_path)"
+    machine="$(elf_machine "$installed_path" 2>/dev/null || true)"
+    if [ "$machine" != "$EM_AARCH64" ] || glibc_linked "$installed_path"; then
       bad "runtime is not installable: $BINARY_NAME is $(elf_description "${machine:-}")"
       failure=1
     else
-      ok "runtime is installable: aarch64 $BINARY_NAME present"
+      ok "runtime is installable: aarch64 $BINARY_NAME at ${installed_path#"$REPO"/}"
     fi
     agent_present || { bad "$SCRIPT_NAME missing from agent/"; failure=1; }
     if [ "$failure" -ne 0 ]; then
       say ""
-      say "Expected until Blocker B1 is cleared. The app still builds and reports"
+      say "Expected when no runtime is installed: the app still builds and reports"
       say "MISSING_RUNTIME at runtime; only the agent stays unavailable."
+      say "Install one with: scripts/fetch-node-android.sh && scripts/build-node-android.sh --install node-out/runtime"
       exit 1
     fi
     ;;

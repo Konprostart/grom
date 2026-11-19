@@ -121,4 +121,63 @@ class AgentLauncherTest {
     fun `describe contains no secret`() {
         assertFalse(AgentLauncher.describe(launch(runtimeDir())).contains(token))
     }
+
+    // ---------------------------------------------------------------- D34 split
+    //
+    // Android denies execve() of files in app-private storage, so the binary is
+    // launched from the native library dir while the script stays behind in the
+    // data dir. These tests pin that layout, because getting it wrong means the
+    // agent can never start on a real device.
+
+    private fun nativeRuntime(): AgentLauncher.RuntimeFiles {
+        val scriptDir = temporary.newFolder("data")
+        File(scriptDir, AgentLauncher.SCRIPT_NAME).writeText("// agent\n")
+        val libDir = temporary.newFolder("lib")
+        File(libDir, AgentLauncher.BINARY_NAME).apply {
+            writeText("")
+            setExecutable(true)
+        }
+        return AgentLauncher.RuntimeFiles(scriptDir, libDir, libDir)
+    }
+
+    private fun launchRuntime(runtime: AgentLauncher.RuntimeFiles) = AgentLauncher.build(
+        runtime = runtime,
+        port = 47001,
+        token = token,
+        logLevel = "info",
+        parentPid = 1234L,
+        homeDir = temporary.newFolder("home"),
+        tmpDir = temporary.newFolder("tmp")
+    )
+
+    @Test
+    fun `binary runs from the native library dir and script from data`() {
+        val runtime = nativeRuntime()
+        val spec = launchRuntime(runtime)
+        assertEquals(runtime.binaryDirectory.absolutePath + "/" + AgentLauncher.BINARY_NAME, spec.argv[0])
+        assertEquals(runtime.script.absolutePath, spec.argv[2])
+        assertTrue(runtime.present)
+    }
+
+    @Test
+    fun `library directory becomes LD_LIBRARY_PATH`() {
+        val runtime = nativeRuntime()
+        assertEquals(
+            runtime.libraryDirectory!!.absolutePath,
+            launchRuntime(runtime).environment["LD_LIBRARY_PATH"]
+        )
+    }
+
+    @Test
+    fun `a static runtime exports no LD_LIBRARY_PATH`() {
+        assertFalse(launch(runtimeDir()).environment.containsKey("LD_LIBRARY_PATH"))
+    }
+
+    @Test
+    fun `missing binary in the native dir is reported even if the script dir has one`() {
+        val scriptDir = runtimeDir()
+        val libDir = temporary.newFolder("emptylib")
+        val runtime = AgentLauncher.RuntimeFiles(scriptDir, libDir, libDir)
+        assertEquals(AgentLauncher.BINARY_NAME, runtime.missingFile())
+    }
 }

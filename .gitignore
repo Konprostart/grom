@@ -17,7 +17,10 @@ captures/
 grom-token.txt
 
 # Operator-supplied Node runtime (large, and never downloaded by Grom).
+# jniLibs/ is where --install puts it (D34); both locations stay out of git, so
+# the repository holds no binaries and the Apache-2.0 tree stays auditable.
 app/src/main/assets/node/libnode.so
+app/src/main/jniLibs/*/*.so
 node-out/
 
 # Test-only keystores ARE committed on purpose (see docs/000-decisions.md D4).

@@ -97,20 +97,23 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/audit/v
 
 ## The agent runtime
 
-Grom does not download anything (D16). The agent script (`agent/grom-agent.js`)
-is packaged into the APK and copied into app-private storage on first start; the
-Node binary is supplied by the operator:
+Grom does not download anything at runtime (D16). The agent script
+(`agent/grom-agent.js`) is packaged into the APK and copied into app-private
+storage on first start; the Node binary is supplied by the operator and runs
+from the APK's native library dir, because Android will not `execve()` a file in
+app-private storage (D34):
 
 ```
-<app files>/grom/node/libnode.so        the runtime, executable (operator)
-<app files>/grom/node/grom-agent.js     the agent entry point (from the APK)
+<app native lib dir>/libnode.so     the runtime, executable (operator, via jniLibs)
+<app files>/grom/node/grom-agent.js the agent entry point (from the APK)
 ```
 
 ```bash
-scripts/build-node-android.sh --status     # is this host able to build/run?
-scripts/build-node-android.sh --docker     # reproducible arm64 recipe
-scripts/build-node-android.sh --install ~/node-out
-scripts/build-node-android.sh --q8         # the on-device node:sqlite probe
+scripts/fetch-node-android.sh              # pinned bionic arm64 runtime + verify
+scripts/fetch-node-android.sh --verify     # runs it: version, node:sqlite (Q8), agent suite
+scripts/build-node-android.sh --install     # into app/src/main/jniLibs/arm64-v8a
+scripts/build-node-android.sh --status      # is this host able to build/run?
+scripts/build-node-android.sh --q8          # the Q8 probe commands
 ```
 
 The agent binds its own ephemeral loopback port and announces it with

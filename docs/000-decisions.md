@@ -4,7 +4,8 @@ Status legend: **ACCEPTED** (normative), **REJECTED** (recorded so it is not
 re-proposed), **DEFERRED** (out of F1, tracked for later).
 
 Provenance: see `docs/RECOVERY.md`. This log is a re-derivation of the D1–D31
-record named in the handoff. The numbering is kept so cross-references survive.
+record named in the handoff, extended with D32–D35 as the agent runtime was
+built out. The numbering is kept so cross-references survive.
 
 ---
 
@@ -152,17 +153,22 @@ old one atomically. Rotation is itself audited.
 **ACCEPTED.** Default port `47001` on `127.0.0.1`. The user may change it in
 settings; the bind policy is unchanged by a port change.
 
-## D24 — Agent binary lives in app-private storage
-**ACCEPTED.** Expected layout:
+## D24 — Agent state lives in app-private storage
+**ACCEPTED, revised by D34.** Expected layout:
 
 ```
-<files>/node/libnode.so        the runtime (exec-only)
+<files>/node/libnode.so        the runtime (exec-only)   <- moved by D34
 <files>/node/grom-agent.js     the agent entry point
 ```
 
 When either file is missing the server starts in `MISSING_RUNTIME`, serves
 health with `"runtime":"missing"`, and refuses agent endpoints with `503`.
 That is a truthful state, not an error to hide.
+
+**Revision (D34):** the *executable* cannot live here — Android denies
+`execve()` of app-private files to apps targeting API 29+, and Grom targets 36.
+The binary is now launched from `ApplicationInfo.nativeLibraryDir`; only the
+script stays under `<files>/node`. The rest of D24 stands.
 
 ## D25 — Readiness is a stdout line, not a port probe
 **ACCEPTED.** The agent writes `GROM_READY <pid>` when it is able to serve.
@@ -231,3 +237,47 @@ the caller as `503`.
 
 *Enforced by:* `RouterTest` (status passthrough), `AgentClientTest`,
 `ServerRuntime.exec`.
+
+## D34 — The executable lives in the APK native library dir, not in files/
+**ACCEPTED.** The agent is launched as:
+
+```
+<ApplicationInfo.nativeLibraryDir>/libnode.so     executable, packaged in jniLibs
+<files>/grom/node/grom-agent.js                   data, read by Node
+```
+
+with `android:extractNativeLibs="true"` in the manifest and `LD_LIBRARY_PATH`
+set to the same directory when the runtime is dynamically linked.
+
+*Why:* Android denies `execve()` of files in app-private storage for apps
+targeting API 29+; Grom targets 36. D24's `<files>/node/libnode.so` could
+therefore never be executed on a supported device, however valid the ELF was.
+JavaScript is data, so it stays in app storage. `AssetRuntime`/`RuntimeInstaller`
+remain for the operator path that ships a binary under `assets/`, but the native
+library dir wins whenever it holds one.
+
+*Consequence for packaging:* dependencies must be co-located and named
+`lib*.so` — Termux SONAMEs such as `libssl.so.3` are renamed and their
+`DT_NEEDED`/`DT_SONAME` strings rewritten in place, which is why the runtime is
+assembled by `scripts/fetch-node-android.sh` rather than copied by hand.
+
+*Enforced by:* `AgentLauncherTest` (paths, `LD_LIBRARY_PATH`), lint,
+`scripts/fetch-node-android.sh --verify`.
+
+## D35 — The runtime is pinned, vendored and verified by execution
+**ACCEPTED.** `scripts/fetch-node-android.sh` assembles the arm64 runtime from
+pinned bionic packages (Node v24.22.3 LTS and its libraries), checks a SHA-256
+for every archive, and treats the build as successful only after the binary
+**runs** — version, a `node:sqlite` round trip (Q8), and the agent suite.
+
+*Why not cross-compile here:* this host is aarch64 with an x86_64-only NDK and
+no Docker; a full V8 build would also need RAM this environment does not have.
+Not compiling is not the same as not knowing: the vendored binary is the same
+bionic/arm64 target, and executing it through `/system/bin/linker64` answers the
+only question that mattered — does Node, including `node:sqlite`, run where the
+phone will run it.
+
+*Why not commit it:* ~91 MB of binaries in an Apache-2.0 repository defeats
+auditability, and a runtime must stay an explicit operator action (S1-R003).
+
+*Enforced by:* `scripts/fetch-node-android.sh --verify`, `docs/RUNTIME.md`.

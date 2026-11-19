@@ -5,17 +5,20 @@ How Grom finds, starts, feeds, watches, and stops the Node agent.
 ## 1. Layout
 
 ### S3-R001
-The runtime lives in app-private storage:
+The runtime is split between an executable and a data file (D34):
 ```
-<app files>/node/libnode.so
-<app files>/node/grom-agent.js
+<ApplicationInfo.nativeLibraryDir>/libnode.so   executable, packaged in jniLibs
+<files>/node/grom-agent.js                      data file, read by Node
 ```
 Both files MUST exist and `libnode.so` MUST be executable for the agent to be
-considered present.
+considered present. The binary MUST NOT be executed from `<app files>`: exec of
+app-private storage is denied to apps targeting API 29+, so an implementation
+that copies the binary there cannot start it.
 
 ### S3-R002
-The runtime is located relative to `Context.getFilesDir()`. No path from the
-environment or from an intent extra may redirect it.
+The script path is located relative to `Context.getFilesDir()`; the executable
+path is taken from `ApplicationInfo.nativeLibraryDir`. No path from the
+environment or from an intent extra may redirect either.
 
 ### S3-R003
 If either file is missing, the runtime state is `MISSING_RUNTIME`. The state
@@ -29,19 +32,20 @@ The agent is launched as an executable process, not through a shell.
 ### S3-R005
 Command line is exactly:
 ```
-<files>/node/libnode.so
+<ApplicationInfo.nativeLibraryDir>/libnode.so
   --experimental-default-type=commonjs
   <files>/node/grom-agent.js
   --port <loopbackPort>
   --parent-pid <serverPid>
 ```
-No secret, token, path outside the runtime directory, or user data appears in
+No secret, token, path outside the runtime directories, or user data appears in
 argv.
 
 ### S3-R006
 The child environment MUST be constructed from scratch, not inherited wholesale.
 It contains only `HOME`, `TMPDIR`, `PATH=/system/bin`, `GROM_LOG_LEVEL`, and
-`LANG`. It MUST NOT contain the bearer token.
+`LANG`, plus `LD_LIBRARY_PATH` pointing at the binary's directory when the
+runtime is dynamically linked. It MUST NOT contain the bearer token.
 
 ### S3-R007
 Sensitive configuration — at minimum the bearer token, the port, and the log

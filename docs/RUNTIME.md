@@ -1,124 +1,117 @@
 # Agent runtime — status, Q8, and how to close it
 
 This page is the single truthful answer to "does the agent actually run?".
-Everything below is checked by `scripts/build-node-android.sh --status`.
+Everything below is checked by `scripts/build-node-android.sh --status` and
+`scripts/fetch-node-android.sh --verify`.
 
 ## What the runtime is
 
-Grom supervises a Node process that lives entirely in app-private storage
-(D24, S3-R001):
+Grom supervises a Node process. Two files are involved, and they deliberately
+live in different places (D24, D34, S3-R001):
 
 ```
-<files>/node/libnode.so        the Node executable, chmod 755
-<files>/node/grom-agent.js     the agent entry point
+<app native lib dir>/libnode.so   the Node executable, chmod 755   (packaged in jniLibs)
+<files>/grom/node/grom-agent.js   the agent entry point            (data file)
 ```
 
-`libnode.so` is an operator-supplied binary. Grom never downloads it
-(S1-R003, S3-R037). The agent script is Grom's own code: its canonical source
-is `agent/grom-agent.js` and Gradle packages it into the APK as
-`assets/node/grom-agent.js`; `RuntimeInstaller` copies it to app storage on
-first start. There is exactly one copy of the script in the tree.
+**Why they are split.** Android refuses `execve()` of files in app-private
+storage for apps targeting API 29+ — Grom targets 36. A runtime copied into
+`files/` therefore *can never start*, no matter how valid the ELF is. Binaries
+must be executed from `ApplicationInfo.nativeLibraryDir`, which only exists if
+they were packaged as APK native libraries (`jniLibs/arm64-v8a/`) and extracted
+at install time (`android:extractNativeLibs="true"`). JavaScript, by contrast,
+is just data, so the agent script correctly stays in app storage.
 
-Since the installer exists, "missing runtime" now means only `libnode.so` —
-which is the honest remaining blocker, not a packaging gap.
+`libnode.so` is operator-supplied and never committed: it is ~46 MB, its
+dependencies another ~45 MB. Grom never downloads it at runtime (S1-R003,
+S3-R037). The agent script is Grom's own code — `agent/grom-agent.js` is the one
+canonical copy, packaged into the APK as `assets/node/grom-agent.js`.
 
 ## Current status
 
 | Item | State | Evidence |
 |---|---|---|
-| `agent/grom-agent.js` | **implemented** | `node --test agent/test/` |
-| Runtime installer (assets → files) | **implemented** | JVM tests, `RuntimeInstallerTest` |
+| `agent/grom-agent.js` | **implemented** | 10/10 on the bionic arm64 runtime **and** on host Node |
+| Runtime installer (assets → files, legacy) | **implemented** | JVM tests, `RuntimeInstallerTest` |
 | Exec proxy (server → agent) | **implemented** | JVM tests, `AgentClientTest` |
-| **B1** arm64 `libnode.so` | **blocked** | no build path on this host (below) |
-| **B2** device run | **blocked** | no `adb`, no attached device |
-| **Q8** `node:sqlite` | **open on-device**, answered for Node 24 on the dev host | see below |
+| **B1** arm64 `libnode.so` | **buildable and verified — one command** | `scripts/fetch-node-android.sh --verify` |
+| **B2** device run | **still blocked** | no `adb`, no attached device |
+| **Q8** `node:sqlite` | **closed on bionic arm64** | `--verify` prints `Q8 closed: … sqlite=7` |
 
-### B1 — why this host cannot produce the binary
+### B1 — no longer "no path exists"
 
-`uname -m` is `aarch64`; the installed NDK
-(`/root/android-sdk/ndk/28.2.13676358`) ships only
-`toolchains/llvm/prebuilt/linux-x86_64`. Those executables cannot run on an
-aarch64 host at all, so no cross-compile starts. Docker is not installed here
-either. The script detects this by *executing* `clang --version` rather than
-listing directories, because the directories exist and would otherwise look
-like a working toolchain.
+The blocker used to be: this host is `aarch64`, the NDK ships only
+`linux-x86_64` prebuilts, and Docker is absent, so nothing could be compiled.
+That is still true — a V8 build also needs several GB of RAM — but it is no
+longer the obstacle, because a **bionic arm64 build does not have to be
+compiled here**:
 
-A prebuilt runtime is also not committed: the binary is large, and a runtime
-must be an explicit operator action.
+```bash
+scripts/fetch-node-android.sh            # fetch → assemble → verify
+scripts/build-node-android.sh --install   # into app/src/main/jniLibs/arm64-v8a
+gradle :app:assembleServer29Debug         # APK now carries the runtime
+```
+
+`fetch-node-android.sh` is pinned (package versions and SHA-256 for every
+archive), normalises the SONAMEs to `lib*.so` (Android packages nothing else as
+a native library), and — the important part — **proves the result by running
+it**. It is not a download that "should work": it executes the binary and the
+agent suite before it will tell you it succeeded.
+
+Note that installing the runtime grows the APK by ~91 MB (uncompressed
+`libnode.so` + `libicu` data). The repository itself stays binary-free.
 
 ### B2 — nothing has run on a device
 
-No `adb` on this host. Consequently the boot receiver, the vendor task-killer
-behaviour, and the quarantine-across-reboot path are unverified on real
-hardware, not merely untested.
+No `adb` on this host. The runtime is verified on the *Android kernel host*
+through the real bionic linker, but the APK itself has not been installed on a
+phone. Boot receiver, vendor task-killers and quarantine-across-reboot remain
+unverified on hardware.
 
-### Q8 — `node:sqlite`
+### Q8 — `node:sqlite`, closed
 
-Measured on this host (Linux x86_64, **Node v24.19.0**):
+Measured on the assembled runtime (`Node v24.22.3`, bionic aarch64), executed
+through `/system/bin/linker64`:
 
 ```
-$ node -e "const s=require('node:sqlite'); ..."
-node:sqlite OK v24.19.0 DatabaseSync,StatementSync,Session,constants,backup
-sqlite query OK
+$ scripts/fetch-node-android.sh --verify
+  ok    executes through /system/bin/linker64: v24.22.3
+  ok    Q8 closed: Q8 v24.22.3 sqlite=7
+  ok    agent test suite: # pass 10
 ```
 
-Measured on the same host with **Node v22.14.0** (arm64 Linux): the module is
-also available **without a flag**, with an `ExperimentalWarning` on stderr, and
-all ten agent tests pass there too. Earlier 22.x releases did require
-`--experimental-sqlite`; v22.14.0 does not. The build script still pins
-**Node 24.19.0**, where the module is no longer experimental, but a 22.14+
-runtime is a supported fallback.
+Earlier evidence on host builds: Node v24.19.0 and v22.14.0 both expose the
+module without a flag (22 emits an `ExperimentalWarning`; some older 22.x need
+`--experimental-sqlite`, which Grom's argv does not pass — S3-R005). Those runs
+were glibc builds and are *not* what a phone executes; the bionic run above is.
 
-What is still open is whether an **Android/bionic arm64 build** of Node 24
-exposes the module. The module is compiled into the binary, not loaded as a
-shared library, so a fully static build should keep it — but "should" is not
-"verified". The one-command probe is in `--q8`; a Termux `nodejs-lts` answers it
-in a minute without any Grom build.
-
-## Producing the binary
-
-On an x86_64 host with Docker:
-
-```bash
-scripts/build-node-android.sh --docker     # prints the exact reproducible recipe
-# ... run it ...
-scripts/build-node-android.sh --install ~/node-out
-```
-
-`--install` refuses anything that is not `e_machine == AArch64` and refuses
-glibc-linked binaries (they pass an architecture check but cannot run on
-Android's bionic). It also chmods the file executable, which `AgentLauncher`
-requires before it reports the runtime as present.
-
-Fastest way to answer Q8 without building anything:
-
-```bash
-# on the phone, in Termux
-pkg install nodejs-lts
-node -e "const s=require('node:sqlite');new s.DatabaseSync(':memory:').exec('create table t(a)');console.log('Q8 OK',process.version)"
-```
+A runtime without the module is still handled truthfully: `kv.*` answers
+`503 STORAGE_UNAVAILABLE` rather than pretending to persist.
 
 ## Verifying on a device
 
 ```bash
 gradle :app:assembleServer29Debug
 adb install -r app/build/outputs/apk/server29/debug/app-server29-debug.apk
-adb shell am start -n app.grom.server/.MainActivity
+adb shell am start -n app.grom.server/.GromActivity
 # copy the token shown by the app, then:
-adb forward tcp:8080 tcp:8080
-curl -s http://127.0.0.1:8080/grom/v1/health          # state: READY
+adb shell run-as app.grom.server \
+  /data/app/*/app.grom.server*/lib/arm64/libnode.so -e \
+  "const s=require('node:sqlite');new s.DatabaseSync(':memory:').exec('create table t(a)');console.log('Q8 OK',process.version)"
+curl -s http://127.0.0.1:47001/grom/v1/health           # state: READY
 curl -s -H "Authorization: Bearer $TOKEN" \
-     -d '{"op":"status"}' http://127.0.0.1:8080/grom/v1/agent/exec
+     -d '{"op":"status"}' http://127.0.0.1:47001/grom/v1/agent/exec
 # expect "sqlite":{"available":true,"backend":"node:sqlite"}
 ```
 
-If `libnode.so` is absent, `health` still returns `200` with
-`"state":"MISSING_RUNTIME"` and the agent endpoints return `503` naming the
-missing file (S3-R035, S2-R026). That is the designed behaviour.
+If no runtime is installed, `health` still returns `200` with
+`"state":"MISSING_RUNTIME"` and agent endpoints return `503` naming the missing
+file (S3-R035, S2-R026). That is the designed behaviour.
 
 ## What is deliberately *not* done
 
-- The APK does not embed a Node binary. Embedding ~100 MB behind a flavour is a
-  distribution decision that has not been made.
-- Nothing is downloaded at runtime or at build time.
-- The dev host's `node:sqlite` result is not presented as a device result.
+- The APK does not embed a Node binary **in git**. The runtime is a build input,
+  ignored by `.gitignore`, produced by one pinned script.
+- Nothing is downloaded by Grom at runtime.
+- A host `node:sqlite` result is never presented as a device result; the bionic
+  execution above is the one that counts.

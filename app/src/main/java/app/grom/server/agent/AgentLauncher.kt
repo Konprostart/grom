@@ -5,12 +5,18 @@ import app.grom.server.core.AgentConfig
 import java.io.File
 
 /**
- * Builds the exact process launch for the agent (D11, D24, S3-R004…S3-R009).
+ * Builds the exact process launch for the agent (D11, D24, D34, S3-R004…S3-R009).
  *
  * Invariants enforced here and asserted by the JVM tests:
  *  - argv contains no secret and no user data;
  *  - the environment is constructed from scratch, never inherited;
  *  - the token travels only in [LaunchSpec.stdin].
+ *
+ * Why the binary does not live beside the script (D34): Android refuses
+ * `execve()` of files in app-private storage for apps targeting API 29+, so a
+ * runtime copied into `files/` could never start. The binary is packaged as an
+ * APK native library and executed from `ApplicationInfo.nativeLibraryDir`,
+ * while the JavaScript entry point stays a data file that Node reads.
  */
 object AgentLauncher {
 
@@ -18,8 +24,18 @@ object AgentLauncher {
     const val SCRIPT_NAME: String = "grom-agent.js"
     const val LOG_LEVEL_DEFAULT: String = "info"
 
-    data class RuntimeFiles(val directory: File) {
-        val binary: File get() = File(directory, BINARY_NAME)
+    /**
+     * @param directory        where [SCRIPT_NAME] lives (app-private storage)
+     * @param binaryDirectory  where [BINARY_NAME] lives (native library dir)
+     * @param libraryDirectory shared objects beside the binary, when the build
+     *                         is dynamically linked to bionic libraries
+     */
+    data class RuntimeFiles(
+        val directory: File,
+        val binaryDirectory: File = directory,
+        val libraryDirectory: File? = null
+    ) {
+        val binary: File get() = File(binaryDirectory, BINARY_NAME)
         val script: File get() = File(directory, SCRIPT_NAME)
 
         val present: Boolean get() = missingFile() == null
@@ -69,6 +85,13 @@ object AgentLauncher {
             "GROM_LOG_LEVEL" to logLevel,
             "LANG" to "C"
         )
+
+        // A dynamically linked runtime resolves libssl/libicu/… from the APK's
+        // native library dir. Only add the variable when there is something to
+        // add: a static build must not carry a meaningless search path.
+        runtime.libraryDirectory?.let { libraries ->
+            environment["LD_LIBRARY_PATH"] = libraries.absolutePath
+        }
 
         val stdin = AgentConfig.encode(token = token, port = port, logLevel = logLevel)
 
