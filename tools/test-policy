@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# test-policy — static invariants that must never regress.
+#
+# These are the checks that cannot be expressed as a unit test because they are
+# about the shape of the tree: manifest permissions, absent symbols, headers.
+# See D1, D2, D5, D15, D18, D21 and S1-R002…S1-R012.
+#
+# The gate is intentionally a fixed count: "17/17" is the number of passes.
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+MAIN="app/src/main/java/app/grom/server"
+MANIFEST_MAIN="app/src/main/AndroidManifest.xml"
+MANIFEST_SERVER="app/src/server29/AndroidManifest.xml"
+FAIL=0
+PASS=0
+
+check() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name" >&2
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+echo "== test-policy =="
+
+# 1. signature-level permission is declared
+check "signature permission declared" \
+  grep -q 'BIND_GROMSERVER' "$MANIFEST_MAIN" 
+
+# 2. the permission uses protectionLevel signature
+#    (wrapped in bash -c: a bare pipeline would run the counter in a subshell)
+check "protectionLevel=signature" \
+  bash -c "grep -A1 'BIND_GROMSERVER' '$MANIFEST_MAIN' | grep -q 'protectionLevel=\"signature\"'"
+
+# 3. the service is gated by that permission
+check "service gated by permission" \
+  grep -q 'android:permission="app.grom.sdk.ipc.BIND_GROMSERVER"' "$MANIFEST_SERVER"
+
+# 4. the server role declares a foreground service type
+check "foregroundServiceType specialUse" \
+  grep -q 'foregroundServiceType="specialUse"' "$MANIFEST_SERVER"
+
+# 5. the bind policy allows exactly the loopback literals
+check "bind policy allow-list" \
+  grep -q 'setOf("127.0.0.1", "::1")' "$MAIN/core/BindPolicy.kt"
+
+# 6. no wildcard bind literal outside the policy
+check "no wildcard bind outside BindPolicy" \
+  bash -c "! grep -rn '\"0\.0\.0\.0\"' $MAIN --include='*.kt' | grep -v 'core/BindPolicy.kt'"
+
+# 7. no hostname resolution on the bind path
+check "no InetAddress.getByName in main sources" \
+  bash -c "! grep -rn 'InetAddress.getByName' $MAIN --include='*.kt'"
+
+# 8. token comparison is constant time
+check "constant-time token compare" \
+  grep -q 'MessageDigest.isEqual' "$MAIN/core/Token.kt"
+
+# 9. the audit chain uses SHA-256
+check "audit chain uses SHA-256" \
+  bash -c "grep -q 'SHA-256' $MAIN/core/AuditChain.kt && grep -q 'SHA-256' $MAIN/core/Token.kt"
+
+# 10. no money vocabulary in server code (D1, S1-R002)
+check "no money/ledger vocabulary" \
+  bash -c "! grep -rniE 'payment|ledger|settlement|\bbalance\b|invoice' $MAIN --include='*.kt'"
+
+# 11. every Kotlin source carries an SPDX header
+check "SPDX headers on all Kotlin sources" \
+  bash -c "! find app sdk -name '*.kt' -not -path '*/build/*' -exec grep -L 'SPDX-License-Identifier: Apache-2.0' {} +"
+
+# 12. the repository licence is Apache-2.0
+check "LICENSE is Apache-2.0" \
+  grep -q 'Apache License' LICENSE
+
+# 13. boot restart is opt-in
+check "boot restart is opt-in" \
+  grep -q 'GromPrefs.startOnBoot' "$MAIN/service/BootReceiver.kt"
+
+# 14. quarantined agents do not restart at boot
+check "boot respects quarantine" \
+  grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
+
+# 15. the IPC bind path checks signatures
+check "onBind applies the signature gate" \
+  bash -c "grep -q 'SignatureGate.isSameSigner' $MAIN/service/GromService.kt"
+
+# 16. cleartext outbound traffic is not enabled
+check "no usesCleartextTraffic" \
+  bash -c "! grep -rq 'usesCleartextTraffic' app/src"
+
+# 17. no absolute http(s) URL in server code (S1-R003)
+check "no outbound URLs in sources" \
+  bash -c "! grep -rnE 'https?://' $MAIN --include='*.kt'"
+
+echo
+TOTAL=$((PASS + FAIL))
+if [ "$FAIL" -ne 0 ]; then
+  echo "test-policy: FAILED ($PASS/$TOTAL)" >&2
+  exit 1
+fi
+echo "test-policy: OK ($PASS/$TOTAL)"
