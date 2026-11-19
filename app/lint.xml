@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icons must live in a -v26 folder: AAPT2 refuses to link an
+     <adaptive-icon> resource from an unversioned mipmap folder (verified by
+     building after moving it), so the folder stays and lint's advice to merge
+     it is suppressed. This is a false positive for this app. -->
+<lint>
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

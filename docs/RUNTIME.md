@@ -19,7 +19,8 @@ storage for apps targeting API 29+ — Grom targets 36. A runtime copied into
 `files/` therefore *can never start*, no matter how valid the ELF is. Binaries
 must be executed from `ApplicationInfo.nativeLibraryDir`, which only exists if
 they were packaged as APK native libraries (`jniLibs/arm64-v8a/`) and extracted
-at install time (`android:extractNativeLibs="true"`). JavaScript, by contrast,
+at install time (AGP `jniLibs.useLegacyPackaging = true`, which produces an
+`extractNativeLibs="true"` APK). JavaScript, by contrast,
 is just data, so the agent script correctly stays in app storage.
 
 `libnode.so` is operator-supplied and never committed: it is ~46 MB, its
@@ -59,7 +60,13 @@ it**. It is not a download that "should work": it executes the binary and the
 agent suite before it will tell you it succeeded.
 
 Note that installing the runtime grows the APK by ~91 MB (uncompressed
-`libnode.so` + `libicu` data). The repository itself stays binary-free.
+`libnode.so` + `libicu` data); the compressed release APK is about 40 MB. The
+repository itself stays binary-free. Published releases already contain the
+runtime (D38), so an installed release needs no local step:
+
+```bash
+adb install -r grom-<version>-server29.apk
+```
 
 ### B2 — nothing has run on a device
 

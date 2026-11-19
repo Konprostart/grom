@@ -11,8 +11,8 @@ android {
         applicationId = "app.grom.server"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     // Two role flavours (F1 step 1):
@@ -57,6 +57,16 @@ android {
     buildFeatures {
         buildConfig = true
         aidl = true
+    }
+
+    // D34: the Node runtime is executed from the APK's native library dir, so
+    // the libraries must be extracted to disk at install time. This is the AGP 8
+    // way to set android:extractNativeLibs="true"; setting the manifest
+    // attribute directly is deprecated (and lint warns about it).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     compileOptions {

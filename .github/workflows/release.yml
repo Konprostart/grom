@@ -1,0 +1,125 @@
+name: release
+
+# Build the installable APKs *with* the arm64 runtime baked in and attach them
+# to a GitHub release. That release is exactly what the in-app update checker
+# reads (`GET /repos/sveatoken/grom/releases/latest`), so a new tag is all it
+# takes for installed builds to see an update.
+#
+# Trigger it by pushing a tag (`git tag v0.2.0 && git push origin v0.2.0`) or
+# by running the workflow manually with an existing tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    name: signed APKs with arm64 runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # For a manual run, build the tag the operator named; for a tag push,
+          # build exactly that commit.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          sdkmanager_bin="$(find "$sdk/cmdline-tools" -maxdepth 3 -name sdkmanager -type f | head -1)"
+          test -x "$sdkmanager_bin"
+          yes | "$sdkmanager_bin" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager_bin" "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+          echo "ANDROID_BUILD_TOOLS=$sdk/build-tools/35.0.0" >> "$GITHUB_ENV"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Assemble and verify the arm64 runtime
+        run: |
+          set -euo pipefail
+          scripts/fetch-node-android.sh --all
+          scripts/build-node-android.sh --install node-out/runtime
+          scripts/build-node-android.sh --verify
+
+      - name: Build release APKs (both roles)
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace \
+            :app:assembleServer29Release \
+            :app:assemblePeripheral26Release
+
+      - name: Verify APK contents and signature
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p dist
+          for flavour in server29 peripheral26; do
+            apk="$(find "app/build/outputs/apk/$flavour/release" -name '*.apk' | head -1)"
+            test -n "$apk"
+            out="dist/grom-${version}-${flavour}.apk"
+            cp "$apk" "$out"
+            unzip -l "$out" | grep -q 'lib/arm64-v8a/libnode.so'
+            unzip -l "$out" | grep -q 'assets/node/grom-agent.js'
+            "$ANDROID_BUILD_TOOLS/apksigner" verify --print-certs "$out" >/dev/null
+            echo "verified $out ($(du -h "$out" | cut -f1))"
+          done
+          cd dist
+          sha256sum ./*.apk > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.apk dist/SHA256SUMS --clobber
+          else
+            gh release create "$TAG" dist/*.apk dist/SHA256SUMS \
+              --title "Grom $TAG" \
+              --notes "Android server role (server29) and peripheral role (peripheral26), both with the verified arm64 bionic Node runtime bundled.
+
+          Install over adb:
+
+              adb install -r grom-${TAG#v}-server29.apk
+
+          The app checks this release feed for updates (Update card -> Check now)."
+          fi
+
+      - name: Upload workflow artifacts (backup copy)
+        uses: actions/upload-artifact@v4
+        with:
+          name: grom-apks-${{ env.TAG }}
+          path: |
+            dist/*.apk
+            dist/SHA256SUMS
+          retention-days: 90

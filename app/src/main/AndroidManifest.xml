@@ -8,16 +8,18 @@
         android:name="app.grom.sdk.ipc.BIND_GROMSERVER"
         android:protectionLevel="signature" />
 
-    <!-- extractNativeLibs is deliberate (D34): the Node runtime is packaged in
-         jniLibs and must exist as a real file under nativeLibraryDir so it can
-         be execve()'d. With the AGP 8 default (false) the libraries stay inside
-         the APK and can only be mmap()'d — no process could start. -->
+    <!-- The Node runtime is packaged in jniLibs and must exist as a real file
+         under nativeLibraryDir so it can be execve()'d (D34). The extraction is
+         requested in build.gradle.kts with jniLibs.useLegacyPackaging; the
+         deprecated manifest attribute is deliberately not set. -->
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_grom"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:extractNativeLibs="true"
         android:theme="@style/Theme.Grom">
 
         <activity

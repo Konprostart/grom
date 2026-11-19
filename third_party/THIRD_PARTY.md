@@ -13,6 +13,7 @@ file (`requirement`), or is external to the build (`toolchain`/`runtime`).
 |---|---|---|---|---|
 | Kotlin standard library | 1.9.22 | Apache-2.0 | language runtime | requirement |
 | org.json | platform | Android | JSON on the platform (not bundled) | platform |
+| HttpURLConnection | platform | Android | the single operator-initiated update check (D37), not bundled | platform |
 
 ## Build and test (not shipped in the APK)
 
@@ -48,6 +49,8 @@ Every row is verified by execution, not by vendoring: see
 ## Deliberately absent
 
 No HTTP server library, no JSON library, no dependency-injection framework, no
-analytics SDK, no crash reporter, no networking client. See D3 and S1-R003.
+analytics SDK, no crash reporter, no third-party networking client. The update
+check uses the platform `HttpURLConnection`, so no component is added to the
+build. See D3, D37 and S1-R003/S1-R033.
 
 If a row above is removed, delete it here in the same commit.

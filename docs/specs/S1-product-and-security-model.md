@@ -15,8 +15,10 @@ Grom MUST NOT hold, compute, authorise, or transmit value. It has no ledger, no
 balance, no account, no settlement, no payment credential.
 
 ### S1-R003
-Grom MUST NOT initiate an outbound connection to the internet. There is no
-telemetry, analytics, crash reporting or update check.
+Grom MUST NOT initiate an outbound connection to the internet on its own. There
+is no telemetry, analytics or crash reporting. The single exception is the
+operator-initiated update check (S1-R033): one HTTPS GET to the public release
+feed, only after the operator explicitly asks for it.
 
 ### S1-R004
 Grom MUST be usable with no account, no sign-in, and no cloud component.
@@ -150,3 +152,19 @@ manual check in `docs/F1-implementation-plan.md`.
 A conformance run is: `gradle test`, `tools/check-third-party`,
 `tools/test-policy`, `tools/verify-ipc-signing`, `tools/test-agent`, and
 `gradle lint`.
+
+## 11. Updates
+
+### S1-R033
+The app MAY check for updates only as an explicit operator action. The check is
+one HTTPS GET to `https://api.github.com/repos/sveatoken/grom/releases/latest`
+with no account, identifier or token; it never runs on a schedule, on boot, or
+in the background. A failed check MUST be reported as a failure, never as "up to
+date". The app MUST NOT download or install an APK itself: a newer release is
+handed to the operator as a link (the release page or the matching APK asset).
+
+### S1-R034
+The operator surface MUST be usable in both light and dark mode, and the mode
+MUST be an explicit operator choice (Auto / Light / Dark) rather than something
+the app changes on its own (D36).
+

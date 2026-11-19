@@ -37,12 +37,20 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK platform 36 and build-tools 35.0.0
+        # The actions/setup-android action (v3) runs `sdkmanager tools`, but
+        # Google removed the legacy "tools" package from the repository, so the
+        # action now fails before any Grom step runs. ubuntu-latest already
+        # ships a complete SDK; install only the two pinned packages on top.
         run: |
-          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
-          echo "ANDROID_BUILD_TOOLS=${ANDROID_SDK_ROOT}/build-tools/35.0.0" >> "$GITHUB_ENV"
+          set -euo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          sdkmanager_bin="$(find "$sdk/cmdline-tools" -maxdepth 3 -name sdkmanager -type f | head -1)"
+          test -x "$sdkmanager_bin"
+          yes | "$sdkmanager_bin" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager_bin" "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+          echo "ANDROID_BUILD_TOOLS=$sdk/build-tools/35.0.0" >> "$GITHUB_ENV"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -70,8 +78,11 @@ jobs:
           tools/test-policy
           tools/verify-ipc-signing
 
-      - name: Lint
-        run: gradle --no-daemon --stacktrace :app:lint
+      - name: Lint (both flavours)
+        run: |
+          gradle --no-daemon --stacktrace \
+            :app:lintServer29Debug \
+            :app:lintPeripheral26Debug
 
       - name: Publish test reports
         if: always()

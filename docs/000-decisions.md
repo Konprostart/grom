@@ -4,8 +4,8 @@ Status legend: **ACCEPTED** (normative), **REJECTED** (recorded so it is not
 re-proposed), **DEFERRED** (out of F1, tracked for later).
 
 Provenance: see `docs/RECOVERY.md`. This log is a re-derivation of the D1–D31
-record named in the handoff, extended with D32–D35 as the agent runtime was
-built out. The numbering is kept so cross-references survive.
+record named in the handoff, extended with D32–D38 as the agent runtime, the operator
+surface, updates and release packaging were built out. The numbering is kept so cross-references survive.
 
 ---
 
@@ -246,7 +246,8 @@ the caller as `503`.
 <files>/grom/node/grom-agent.js                   data, read by Node
 ```
 
-with `android:extractNativeLibs="true"` in the manifest and `LD_LIBRARY_PATH`
+with `jniLibs.useLegacyPackaging = true` in `build.gradle.kts` (AGP's
+supported way to get `extractNativeLibs="true"`) and `LD_LIBRARY_PATH`
 set to the same directory when the runtime is dynamically linked.
 
 *Why:* Android denies `execve()` of files in app-private storage for apps
@@ -281,3 +282,49 @@ phone will run it.
 auditability, and a runtime must stay an explicit operator action (S1-R003).
 
 *Enforced by:* `scripts/fetch-node-android.sh --verify`, `docs/RUNTIME.md`.
+
+## D36 — The operator surface is monochrome, with an explicit light/dark choice
+**ACCEPTED.** The app has two palettes: white ground / black ink and black
+ground / white ink. There is no brand accent; colour is reserved for state
+(green positive, red negative) so "running" and "runtime missing" are readable
+without reading. Cards are near-flat surfaces with hairline borders, labels are
+tracked uppercase, and the status is the largest type on the screen — the
+zen.com-style minimalism the operator asked for, applied to a server console.
+
+The mode is `Auto` (follow the system), `Light`, or `Dark`, stored with the other
+non-secret preferences; the app never flips it on its own. The window, status
+bar and navigation bar are painted from the same palette, and the app icon is
+the same mark in both modes.
+
+*Enforced by:* `GromTheme`, `:app:lint`, and the `values/` + `values-night/`
+resource pair.
+
+## D37 — The update check is operator-initiated and reads only the release feed
+**ACCEPTED.** "Check now" performs exactly one HTTPS GET to
+`https://api.github.com/repos/sveatoken/grom/releases/latest`. No account, no
+identifier, no token, no background job, no analytics. The response is parsed by
+Grom's own JSON reader (D3), the version is compared numerically against
+`BuildConfig.VERSION_NAME` (flavour suffix stripped), and the result is one of:
+newer release, current, or failure. A failure is shown as a failure.
+
+A newer release is opened in the browser — either the flavour-matching APK asset
+or the release page. Grom never downloads or installs an APK itself. This
+amends S1-R003 and adds S1-R033; it is why `tools/test-policy` permits exactly
+one absolute URL, in `UpdateChecker.kt`, and fails if any other source grows one.
+
+*Enforced by:* `JsonParserTest`, `UpdateCheckerTest`, `tools/test-policy` (17).
+
+## D38 — Release APKs bundle the runtime and are verified before publishing
+**ACCEPTED.** `.github/workflows/release.yml` runs on a `v*` tag: it assembles
+the pinned arm64 runtime, installs it into `jniLibs`, builds both role flavours,
+and verifies each APK contains `lib/arm64-v8a/libnode.so` and
+`assets/node/grom-agent.js` and passes `apksigner verify` before attaching it to
+the GitHub release with a `SHA256SUMS` file. The release is the same document
+the in-app update check reads, so tagging is the whole update mechanism.
+
+Release builds use the committed test key (D4) until a production key exists;
+the release notes and README say so. A public release signed with a test key is
+installable and updatable, but it does not establish publisher identity.
+
+*Enforced by:* `.github/workflows/release.yml`, `scripts/build-node-android.sh
+--verify`.

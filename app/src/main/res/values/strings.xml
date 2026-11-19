@@ -4,4 +4,82 @@
     <string name="notification_channel">Grom server</string>
     <string name="notification_title">Grom is running</string>
     <string name="notification_text">Loopback-only server on 127.0.0.1</string>
+
+    <!-- Operator surface (D36). Keeping every visible string here makes a
+         localization pass mechanical and keeps lint's SetTextI18n clean. -->
+    <string name="ui_wordmark">GROM</string>
+    <string name="ui_subtitle">LOCAL SERVER \u00b7 LOOPBACK ONLY</string>
+    <string name="ui_footer">Grom %1$s \u00b7 Apache-2.0</string>
+    <string name="ui_status">Status</string>
+    <string name="ui_node_runtime">Node runtime</string>
+    <string name="ui_control">Control</string>
+    <string name="ui_update">Update</string>
+    <string name="ui_restart_agent">Restart agent</string>
+    <string name="ui_reset_quarantine">Reset quarantine</string>
+    <string name="ui_rotate_token">Rotate API token</string>
+    <string name="ui_start_on_boot">Start on boot</string>
+    <string name="ui_on">ON</string>
+    <string name="ui_off">OFF</string>
+    <string name="ui_agent">agent</string>
+    <string name="ui_policy">policy</string>
+    <string name="ui_rotate">rotate</string>
+    <string name="ui_dash">\u2014</string>
+
+    <string name="state_peripheral">Peripheral</string>
+    <string name="state_offline">Offline</string>
+    <string name="state_server">Server</string>
+    <string name="state_running">Running</string>
+    <string name="state_starting">Starting</string>
+    <string name="state_runtime_missing">Runtime missing</string>
+    <string name="state_quarantined">Quarantined</string>
+    <string name="state_stopped">Stopped</string>
+
+    <string name="action_start">Start server</string>
+    <string name="action_stop">Stop server</string>
+
+    <string name="detail_peripheral">This role never binds a socket. It can still check for app updates.</string>
+    <string name="detail_ipc_unbound">IPC not bound.</string>
+    <string name="detail_ipc_reason">IPC not bound \u2014 %1$s</string>
+    <string name="detail_address">127.0.0.1:%1$d</string>
+    <string name="detail_address_agent">127.0.0.1:%1$d \u00b7 agent :%2$d</string>
+    <string name="detail_starting">The supervisor is bringing the agent up.</string>
+    <string name="detail_runtime_missing">The HTTP API is live, but the agent cannot start until a runtime is installed.</string>
+    <string name="detail_quarantine_default">Three crashes inside the window.</string>
+    <string name="detail_stopped">The server is not running.</string>
+
+    <string name="runtime_not_applicable">Not applicable</string>
+    <string name="runtime_install_server_role">Install the server role to run the agent.</string>
+    <string name="runtime_unknown">Unknown</string>
+    <string name="runtime_start_to_inspect">Start the server to inspect the runtime.</string>
+    <string name="runtime_ready">Node agent ready</string>
+    <string name="runtime_installed">Node runtime installed</string>
+    <string name="runtime_ready_detail">pid %1$d \u00b7 restarts %2$d \u00b7 crashes %3$d</string>
+    <string name="runtime_no_process">Runtime present; no agent process yet.</string>
+    <string name="runtime_missing_title">Runtime not installed</string>
+    <string name="runtime_missing_named">Missing %1$s. Server endpoints still answer; the agent does not.</string>
+    <string name="runtime_missing_generic">libnode.so is not packaged in this build. Install the arm64 runtime.</string>
+
+    <string name="update_updates">Updates</string>
+    <string name="update_installed">Installed: %1$s</string>
+    <string name="update_check_now">Check now</string>
+    <string name="update_checking_title">Checking\u2026</string>
+    <string name="update_checking_detail">Reading the latest GitHub release.</string>
+    <string name="update_checking_button">Checking</string>
+    <string name="update_current">You\'re up to date</string>
+    <string name="update_available">v%1$s available</string>
+    <string name="update_failed">Update check failed</string>
+    <string name="update_download">Download APK</string>
+    <string name="update_open_release">Open release page</string>
+    <string name="update_try_again">Try again</string>
+    <string name="update_check_again">Check again</string>
+    <string name="update_unknown_failure">Could not reach GitHub.</string>
+
+    <string name="toast_not_bound">%1$s: not bound</string>
+    <string name="toast_ok">%1$s: OK</string>
+    <string name="toast_forbidden">%1$s: forbidden</string>
+    <string name="toast_server_gone">%1$s: server went away</string>
+    <string name="toast_error">%1$s: %2$s</string>
+    <string name="toast_token_rotated">Token rotated</string>
+    <string name="toast_no_browser">No browser available</string>
+    <string name="toast_no_download_link">No download link in this release</string>
 </resources>

@@ -80,8 +80,8 @@ during the rebuild; they were the two open items at handoff.
 
 | Gate | Result |
 |---|---|
-| `:app:testServer29DebugUnitTest` | 163/163 |
-| `:app:testPeripheral26DebugUnitTest` | 163/163 |
+| `:app:testServer29DebugUnitTest` | 181/181 |
+| `:app:testPeripheral26DebugUnitTest` | 181/181 |
 | `tools/test-policy` | 17/17 |
 | `tools/check-third-party` | 10/10 |
 | `tools/verify-ipc-signing` | 10/10 |
@@ -113,3 +113,17 @@ has since been closed:
 Until (2) closes, the on-device behaviour of the supervisor is unknown, but the
 runtime is no longer the reason: install it and `POST /grom/v1/agent/*` returns
 `503 MISSING_RUNTIME` only while the binary is genuinely absent. See D31, D34.
+
+## Post-F1 — operator surface, updates and release packaging
+
+These are the changes after F1 that make the tree installable and updatable from
+a phone rather than only buildable:
+
+| Item | Decision | Gate |
+|---|---|---|
+| Monochrome Auto/Light/Dark operator surface | D36 | review + `:app:lint` |
+| Operator-initiated update check against the release feed | D37 | `JsonParserTest`, `UpdateCheckerTest`, `tools/test-policy` |
+| Release workflow that bundles and verifies the arm64 runtime | D38 | `.github/workflows/release.yml` |
+
+The version moves to `0.2.0` (versionCode 2). Tags of the form `v*` publish
+APKs; the app reads the latest release. Procedure: `docs/RELEASING.md`.

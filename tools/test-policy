@@ -93,9 +93,10 @@ check "every IPC transaction applies the signature gate" \
 check "no usesCleartextTraffic" \
   bash -c "! grep -rq 'usesCleartextTraffic' app/src"
 
-# 17. no absolute http(s) URL in server code (S1-R003)
-check "no outbound URLs in sources" \
-  bash -c "! grep -rnE 'https?://' $MAIN --include='*.kt'"
+# 17. the only outbound URL in server code is the operator-initiated update feed
+#     (D37, S1-R003/S1-R033). Everything else stays offline.
+check "no outbound URLs except the update feed" \
+  bash -c "! grep -rnE 'https?://' $MAIN --include='*.kt' --exclude='UpdateChecker.kt' && grep -q 'https://api.github.com/repos/' $MAIN/update/UpdateChecker.kt"
 
 echo
 TOTAL=$((PASS + FAIL))
