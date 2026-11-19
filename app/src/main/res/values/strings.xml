@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Grom</string>
+    <string name="notification_channel">Grom server</string>
+    <string name="notification_title">Grom is running</string>
+    <string name="notification_text">Loopback-only server on 127.0.0.1</string>
+</resources>

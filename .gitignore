@@ -1,0 +1,20 @@
+# Gradle / Android build output
+.gradle/
+build/
+*/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+*.hprof
+
+# Generated runtime files
+*.log
+grom-token.txt
+
+# Test-only keystores ARE committed on purpose (see docs/000-decisions.md D4).
+!keys/*.jks
