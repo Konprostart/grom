@@ -1,0 +1,82 @@
+# build-node-android — produce the arm64 libnode.so the agent runs on.
+#
+# Grom's repository holds no binaries (D35), so the runtime is assembled here on
+# an x86_64 runner and published as a workflow artifact. The job is deliberately
+# boring: one pinned script does the work, and the artifact is checksummed by
+# the script itself (SHA256SUMS inside the runtime directory).
+#
+# This file needs the `workflow` scope to land on GitHub. Until the pushing
+# token has it, the same artifact can be produced with:
+#
+#     scripts/fetch-node-android.sh --verify
+#
+# which additionally *executes* the runtime on any host whose kernel is Android
+# (bionic linker present) — something a stock ubuntu runner cannot do.
+name: build-node-android
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Also create a release with the runtime attached"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  runtime:
+    name: assemble arm64 runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the runtime from pinned packages
+        run: |
+          set -euo pipefail
+          scripts/fetch-node-android.sh --fetch
+          scripts/fetch-node-android.sh --assemble
+          # Static checks only: a stock runner has no Android linker, so the
+          # script reports the execution checks as skipped rather than faking a
+          # pass or failing the build.
+          scripts/fetch-node-android.sh --verify
+
+      - name: Show what was produced
+        run: |
+          set -euo pipefail
+          ls -la node-out/runtime
+          echo "---- MANIFEST ----"
+          cat node-out/runtime/MANIFEST
+          echo "---- sizes ----"
+          du -sh node-out/runtime
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          cd node-out
+          tar -czf grom-runtime-arm64.tar.gz -C runtime .
+          sha256sum grom-runtime-arm64.tar.gz >> grom-runtime-arm64.tar.gz.sha256
+          cat grom-runtime-arm64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grom-runtime-arm64
+          path: |
+            node-out/grom-runtime-arm64.tar.gz
+            node-out/grom-runtime-arm64.tar.gz.sha256
+          retention-days: 30
+
+      - name: Publish a release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="runtime-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" \
+            node-out/grom-runtime-arm64.tar.gz \
+            node-out/grom-runtime-arm64.tar.gz.sha256 \
+            --title "Grom agent runtime $tag" \
+            --notes "arm64 bionic Node runtime assembled by build-node-android.yml.
+          Install with: scripts/build-node-android.sh --install <extracted dir>"
