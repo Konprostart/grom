@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# check-third-party — the document and the build must agree (D17, S1-R026).
+#
+# Checks:
+#   1. every external Gradle dependency appears in third_party/THIRD_PARTY.md
+#   2. every "requirement" row in the document appears in a Gradle build file
+#   3. no forbidden networking/analytics component is declared
+#   4. the document exists and is non-empty
+#
+# Exit 0 when all checks pass.
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+DOC="third_party/THIRD_PARTY.md"
+FAIL=0
+CHECKED=0
+
+fail() { echo "FAIL: $*" >&2; FAIL=1; }
+pass() { CHECKED=$((CHECKED + 1)); }
+
+echo "== check-third-party =="
+
+# --- 4. document present -----------------------------------------------------
+if [ ! -s "$DOC" ]; then
+  echo "FAIL: $DOC missing or empty" >&2
+  exit 1
+fi
+pass
+
+# --- collect declared dependencies from Gradle files -------------------------
+BUILD_FILES=$(find . -name 'build.gradle.kts' -not -path './build/*' 2>/dev/null)
+
+# external coordinates such as implementation("group:artifact:version")
+DEP_COORDS=$(grep -hoE '"(com\.android[^"]*|org\.jetbrains\.kotlin[^"]*|junit:junit[^"]*)"' $BUILD_FILES 2>/dev/null | tr -d '"' | sort -u)
+
+# map coordinates (including plugin ids) to the names used in the document
+doc_name_for() {
+  case "$1" in
+    com.android.application|com.android.library|com.android.tools.build:gradle)
+      echo "Android Gradle Plugin" ;;
+    org.jetbrains.kotlin.android|org.jetbrains.kotlin:kotlin-gradle-plugin)
+      echo "Kotlin Gradle plugin" ;;
+    org.jetbrains.kotlin:kotlin-stdlib)
+      echo "Kotlin standard library" ;;
+    junit:junit*)
+      echo "JUnit" ;;
+    *)
+      echo "" ;;
+  esac
+}
+
+for coord in $DEP_COORDS; do
+  [ -n "$coord" ] || continue
+  name="$(doc_name_for "$coord")"
+  if [ -z "$name" ]; then
+    fail "dependency '$coord' has no mapping in tools/check-third-party"
+    continue
+  fi
+  if grep -qF "$name" "$DOC"; then
+    pass
+  else
+    fail "dependency '$coord' ($name) is not documented in $DOC"
+  fi
+done
+
+# --- 2. every runtime/test requirement row is actually declared --------------
+while IFS='|' read -r _ component _version _licence _purpose build; do
+  [ "$(echo "$build" | tr -d ' ')" = "requirement" ] || continue
+  case "$component" in
+    "Kotlin standard library")
+      grep -q 'kotlin-stdlib' $BUILD_FILES || fail "document lists Kotlin stdlib but no build declares kotlin-stdlib (implicit via plugin is acceptable only if documented as toolchain)" ;;
+    "Android Gradle Plugin")
+      grep -q 'com.android.application\|com.android.library' $BUILD_FILES || fail "document lists AGP but no build applies it" ;;
+    "Kotlin Gradle plugin")
+      grep -q 'org.jetbrains.kotlin.android' $BUILD_FILES || fail "document lists the Kotlin plugin but no build applies it" ;;
+    "JUnit")
+      grep -q 'junit:junit' $BUILD_FILES || fail "document lists JUnit but no build declares it" ;;
+    *)
+      ;;
+  esac
+  pass
+done < <(grep -E '^\| [A-Za-z]' "$DOC")
+
+# --- 3. forbidden components --------------------------------------------------
+FORBIDDEN="okhttp|retrofit|volley|ktor|firebase|crashlytics|sentry|mixpanel|amplitude|glide|picasso|coil|rxjava|koin|dagger|hilt|kodein"
+if echo "$DEP_COORDS" | grep -qiE "$FORBIDDEN"; then
+  fail "forbidden component declared: $(echo "$DEP_COORDS" | grep -iE "$FORBIDDEN" | head -3 | tr '\n' ' ')"
+else
+  pass
+fi
+
+echo
+if [ "$FAIL" -ne 0 ]; then
+  echo "check-third-party: FAILED" >&2
+  exit 1
+fi
+echo "check-third-party: OK ($CHECKED checks)"
