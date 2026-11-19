@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# verify-ipc-signing — the C-008 evidence, without a device (S4-R024, S4-R025).
+#
+# Four checks:
+#   1. the three APKs exist (app server29, samecert, foreigncert);
+#   2. the merged manifest declares the permission as signature-protected and
+#      the service is gated by it;
+#   3. samecert is signed with the same certificate as the app;
+#   4. foreigncert is signed with a different certificate.
+#
+# Exits non-zero if any check fails.
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+BUILD_TOOLS="${ANDROID_BUILD_TOOLS:-/root/android-sdk/build-tools/35.0.0}"
+APKSIGNER="$BUILD_TOOLS/apksigner"
+AAPT2="$BUILD_TOOLS/aapt2"
+
+APP_APK="app/build/outputs/apk/server29/debug/app-server29-debug.apk"
+SAME_APK="testapps/samecert/build/outputs/apk/debug/samecert-debug.apk"
+FOREIGN_APK="testapps/foreigncert/build/outputs/apk/debug/foreigncert-debug.apk"
+
+FAIL=0
+PASS=0
+
+check() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    PASS=$((PASS + 1))
+    echo "  ok   $name"
+  else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL $name" >&2
+  fi
+}
+
+echo "== verify-ipc-signing =="
+
+for tool in "$APKSIGNER" "$AAPT2"; do
+  if [ ! -x "$tool" ]; then
+    echo "missing build tool: $tool (set ANDROID_BUILD_TOOLS)" >&2
+    exit 2
+  fi
+done
+
+# --- 1. artifacts exist -------------------------------------------------------
+check "app APK exists"            test -f "$APP_APK"
+check "samecert APK exists"       test -f "$SAME_APK"
+check "foreigncert APK exists"    test -f "$FOREIGN_APK"
+
+if [ "$FAIL" -ne 0 ]; then
+  echo
+  echo "build the APKs first:"
+  echo "  gradle :app:assembleServer29Debug :testapps:samecert:assembleDebug :testapps:foreigncert:assembleDebug"
+  exit 1
+fi
+
+MANIFEST="$("$AAPT2" dump xmltree --file AndroidManifest.xml "$APP_APK" 2>/dev/null)"
+
+# --- 2. merged manifest -------------------------------------------------------
+check "permission BIND_GROMSERVER declared" \
+  bash -c "echo \"\$1\" | grep -q 'BIND_GROMSERVER'" _ "$MANIFEST"
+check "permission is signature-protected" \
+  bash -c "echo \"\$1\" | grep -A2 'BIND_GROMSERVER' | grep -qi '0x00000002'" _ "$MANIFEST"
+check "service gated by the permission" \
+  bash -c "echo \"\$1\" | grep -q 'app.grom.sdk.ipc.BIND_GROMSERVER'" _ "$MANIFEST"
+check "service is exported" \
+  bash -c "echo \"\$1\" | grep -q 'GromService'" _ "$MANIFEST"
+
+# --- 3/4. certificates --------------------------------------------------------
+cert_of() {
+  "$APKSIGNER" verify --print-certs "$1" 2>/dev/null \
+    | grep -m1 'SHA-256 digest' | sed 's/.*digest: *//'
+}
+
+APP_CERT="$(cert_of "$APP_APK")"
+SAME_CERT="$(cert_of "$SAME_APK")"
+FOREIGN_CERT="$(cert_of "$FOREIGN_APK")"
+
+echo "  app       sha256=$APP_CERT"
+echo "  samecert  sha256=$SAME_CERT"
+echo "  foreign   sha256=$FOREIGN_CERT"
+
+check "app and samecert share a certificate" test "$APP_CERT" = "$SAME_CERT"
+check "foreigncert has a different certificate" test "$APP_CERT" != "$FOREIGN_CERT"
+check "samecert and foreigncert differ" test "$SAME_CERT" != "$FOREIGN_CERT"
+
+echo
+if [ "$FAIL" -ne 0 ]; then
+  echo "verify-ipc-signing: FAILED ($PASS passed, $FAIL failed)" >&2
+  exit 1
+fi
+echo "verify-ipc-signing: OK ($PASS/$PASS)"
