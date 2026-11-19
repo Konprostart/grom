@@ -1,0 +1,35 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Server-only surface (D2, S1-R006). The peripheral flavour does not
+         declare the service, so it cannot be started and cannot bind. -->
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <service
+            android:name="app.grom.server.service.GromService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="app.grom.sdk.ipc.BIND_GROMSERVER">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="loopback-only local automation server" />
+            <intent-filter>
+                <action android:name="app.grom.sdk.ipc.GROM_SERVER" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="app.grom.server.service.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
