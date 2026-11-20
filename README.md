@@ -89,7 +89,7 @@ release shows its version and a **Download APK** button that opens the matching
 flavour asset in the browser. A failed check is reported as a failure, never as
 "up to date". Grom never downloads or installs an APK itself.
 
-Tagging is the release process: `git tag v0.4.0 && git push origin v0.4.0`
+Tagging is the release process: `git tag v0.5.0 && git push origin v0.5.0`
 runs `.github/workflows/release.yml`, which builds both roles with the runtime
 inside, verifies the contents and signature, and publishes
 `grom-server29.apk`, `grom-peripheral26.apk` and `SHA256SUMS` under stable

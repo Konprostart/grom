@@ -11,11 +11,11 @@ See D37 (update check) and D38 (release build) in `docs/000-decisions.md`.
 `app/build.gradle.kts`:
 
 ```kotlin
-versionCode = 4          // must increase for every installable build
-versionName = "0.4.0"    // the flavour suffix is added by the flavour
+versionCode = 5          // must increase for every installable build
+versionName = "0.5.0"    // the flavour suffix is added by the flavour
 ```
 
-The in-app comparison strips the flavour suffix (`0.4.0-server29` → `0.4.0`) and
+The in-app comparison strips the flavour suffix (`0.5.0-server29` → `0.5.0`) and
 compares numerically, so `0.10.0` is correctly newer than `0.9.0`.
 
 ## 2. Verify locally
@@ -31,8 +31,8 @@ total).
 ## 3. Release with the runtime included
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 `.github/workflows/release.yml` then:

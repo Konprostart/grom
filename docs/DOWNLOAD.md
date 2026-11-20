@@ -40,12 +40,12 @@ The release workflow therefore publishes:
 | `grom-peripheral26.apk` | peripheral role, Android 8+, never binds a socket |
 | `SHA256SUMS` | checksums (recommended with a direct download link) |
 
-The version lives in the tag (`v0.4.0`), the release title, `BuildConfig` and the
-app's update card. The in-app update checker selects assets by the `server29` /
-`peripheral26` substring, so it is unaffected by the rename.
+The version lives in the tag (`vX.Y.Z`), the release title, `BuildConfig` and
+the app's update card. The in-app update checker selects assets by the
+`server29` / `peripheral26` substring, so it is unaffected by the rename.
 
 Users who want a pinned build can still open the release for a tag:
-`https://github.com/sveatoken/grom/releases/tag/v0.4.0`.
+`https://github.com/sveatoken/grom/releases/tag/vX.Y.Z`.
 
 ## 3. Invite links (`?ref=`)
 
