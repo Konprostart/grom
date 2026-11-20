@@ -7,6 +7,9 @@ import app.grom.server.http.HttpParser
 import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
 import app.grom.server.superserver.auth.Ed25519
+import app.grom.server.superserver.nostr.Nip19
+import app.grom.server.superserver.nostr.RelayUrl
+import app.grom.server.superserver.nostr.RemoteBridgeHint
 import java.util.Base64
 
 /**
@@ -96,10 +99,30 @@ data class SuperServerConfig(
     val sessionTtlMs: Long = 12L * 60 * 60 * 1000,
     val maxBodyBytes: Int = HttpParser.MAX_BODY_BYTES,
     val maxConnections: Int = 16,
-    val maxSseClients: Int = 4
+    val maxSseClients: Int = 4,
+    /**
+     * Reference configuration for an external bridge (D52). None of it opens a
+     * connection from Grom: `npub` is a public key, `relays` is a list of relay
+     * URLs an external VPS may use, and `remoteBridge` is a free-text label for
+     * a tunnel the operator runs elsewhere.
+     */
+    val npub: String? = null,
+    val relays: List<String> = emptyList(),
+    val remoteBridge: RemoteBridgeHint? = null
 ) {
 
     fun enabledKeys(): List<ApiKeyConfig> = keys.filter { it.enabled }
+
+    /**
+     * True when [other] differs only in the reference fields (npub, relays,
+     * remoteBridge). Such a change can be applied without stopping the listener,
+     * so active sessions and SSE streams survive (D54).
+     */
+    fun sameRuntimePolicy(other: SuperServerConfig): Boolean =
+        runtimePolicy() == other.runtimePolicy()
+
+    private fun runtimePolicy(): SuperServerConfig =
+        copy(npub = null, relays = emptyList(), remoteBridge = null)
 
     fun hasCredential(): Boolean =
         !passwordHash.isNullOrBlank() || enabledKeys().isNotEmpty()
@@ -197,6 +220,35 @@ data class SuperServerConfig(
             }
         }
 
+        // Reference configuration (D52). It is never dialled, but a bad value
+        // would still travel to an external bridge and confuse it.
+        if (npub != null && Nip19.normalizeNpub(npub) == null) {
+            return ConfigCheck.Invalid(
+                "BAD_NPUB",
+                "npub must be a NIP-19 npub or a 64-character hex public key"
+            )
+        }
+        val seenRelays = LinkedHashSet<String>()
+        for (relay in relays) {
+            val normalized = RelayUrl.normalizeRelay(relay)
+                ?: return ConfigCheck.Invalid(
+                    "BAD_RELAY",
+                    "relay '${relay.take(80)}' is not a ws:// or wss:// URL"
+                )
+            seenRelays.add(normalized)
+        }
+        if (seenRelays.size > RelayUrl.MAX_RELAYS) {
+            return ConfigCheck.Invalid(
+                "TOO_MANY_RELAYS",
+                "at most ${RelayUrl.MAX_RELAYS} relays may be configured"
+            )
+        }
+        remoteBridge?.let { hint ->
+            hint.validate()?.let { problem ->
+                return ConfigCheck.Invalid("BAD_REMOTE_BRIDGE", problem)
+            }
+        }
+
         return ConfigCheck.Ok
     }
 
@@ -226,7 +278,12 @@ data class SuperServerConfig(
             "sessionTtlMs" to sessionTtlMs,
             "maxBodyBytes" to maxBodyBytes,
             "maxConnections" to maxConnections,
-            "maxSseClients" to maxSseClients
+            "maxSseClients" to maxSseClients,
+            "npub" to npub,
+            "relays" to relays,
+            "remoteBridge" to remoteBridge?.let {
+                mapOf("label" to it.label, "description" to it.description)
+            }
         )
     )
 
@@ -251,8 +308,21 @@ data class SuperServerConfig(
                 sessionTtlMs = longOr(root["sessionTtlMs"], defaults.sessionTtlMs),
                 maxBodyBytes = intOr(root["maxBodyBytes"], defaults.maxBodyBytes),
                 maxConnections = intOr(root["maxConnections"], defaults.maxConnections),
-                maxSseClients = intOr(root["maxSseClients"], defaults.maxSseClients)
+                maxSseClients = intOr(root["maxSseClients"], defaults.maxSseClients),
+                npub = (root["npub"] as? String)?.trim()?.takeIf { it.isNotEmpty() },
+                relays = parseRelays(root["relays"]),
+                remoteBridge = RemoteBridgeHint.fromJson(root["remoteBridge"])
             )
+        }
+
+        /**
+         * Keeps entries exactly as written. A malformed relay is *not* dropped
+         * here: `validate` must report `BAD_RELAY` instead of silently losing the
+         * operator's configuration.
+         */
+        private fun parseRelays(raw: Any?): List<String> {
+            val list = raw as? List<*> ?: return emptyList()
+            return list.mapNotNull { (it as? String)?.trim()?.takeIf { value -> value.isNotEmpty() } }
         }
 
         private fun intOr(value: Any?, fallback: Int): Int =

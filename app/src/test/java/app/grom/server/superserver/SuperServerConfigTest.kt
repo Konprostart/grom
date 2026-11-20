@@ -3,7 +3,9 @@ package app.grom.server.superserver
 
 import app.grom.server.core.BindMode
 import app.grom.server.superserver.auth.PasswordHash
+import app.grom.server.superserver.nostr.RemoteBridgeHint
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -24,7 +26,10 @@ class SuperServerConfigTest {
         passwordHash: String? = encoded,
         keys: List<ApiKeyConfig> = emptyList(),
         lightning: LightningSettings = LightningSettings(),
-        ack: Boolean = false
+        ack: Boolean = false,
+        npub: String? = null,
+        relays: List<String> = emptyList(),
+        bridge: RemoteBridgeHint? = null
     ) = SuperServerConfig(
         enabled = enabled,
         bind = bind,
@@ -33,7 +38,10 @@ class SuperServerConfigTest {
         passwordHash = passwordHash,
         keys = keys,
         lightning = lightning,
-        acknowledgePublicBind = ack
+        acknowledgePublicBind = ack,
+        npub = npub,
+        relays = relays,
+        remoteBridge = bridge
     )
 
     private fun invalidCode(check: ConfigCheck): String =
@@ -145,5 +153,94 @@ class SuperServerConfigTest {
         assertNotNull(partial)
         assertEquals(BindMode.LOOPBACK, partial!!.bind)
         assertEquals(AuthMode.BOTH, partial.auth)
+    }
+
+    // ----------------------------------------------- reference config (D52–D54)
+
+    private val validNpub =
+        "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg"
+
+    @Test
+    fun aValidNpubIsAcceptedAndAnInvalidOneIsRefused() {
+        assertEquals(ConfigCheck.Ok, config(npub = validNpub).validate(47_001))
+        assertEquals(
+            ConfigCheck.Ok,
+            config(npub = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e")
+                .validate(47_001)
+        )
+        assertEquals("BAD_NPUB", invalidCode(config(npub = "npub1broken").validate(47_001)))
+        assertEquals("BAD_NPUB", invalidCode(config(npub = "nsec1abc").validate(47_001)))
+    }
+
+    @Test
+    fun relayListItemValidationIsExplicit() {
+        assertEquals(
+            ConfigCheck.Ok,
+            config(relays = listOf("wss://a.example", "ws://127.0.0.1:7777")).validate(47_001)
+        )
+        assertEquals(
+            "BAD_RELAY",
+            invalidCode(config(relays = listOf("https://a.example")).validate(47_001))
+        )
+        val tooMany = (1..9).map { "wss://relay$it.example" }
+        assertEquals("TOO_MANY_RELAYS", invalidCode(config(relays = tooMany).validate(47_001)))
+    }
+
+    @Test
+    fun bridgeHintsAreValidatedForLengthAndSecrets() {
+        assertEquals(
+            ConfigCheck.Ok,
+            config(bridge = RemoteBridgeHint("Mostro VPS", "tunnel")).validate(47_001)
+        )
+        assertEquals(
+            "BAD_REMOTE_BRIDGE",
+            invalidCode(
+                config(bridge = RemoteBridgeHint("nsec1" + "a".repeat(40))).validate(47_001)
+            )
+        )
+        assertEquals(
+            "BAD_REMOTE_BRIDGE",
+            invalidCode(config(bridge = RemoteBridgeHint("a".repeat(81))).validate(47_001))
+        )
+    }
+
+    @Test
+    fun referenceFieldsSurviveTheJsonRoundTrip() {
+        val original = config(
+            npub = validNpub,
+            relays = listOf("wss://a.example", "ws://127.0.0.1:7777"),
+            bridge = RemoteBridgeHint("Mostro VPS", "SSH reverse tunnel")
+        )
+        val decoded = SuperServerConfig.fromJson(original.toJson())!!
+        assertEquals(validNpub, decoded.npub)
+        assertEquals(original.relays, decoded.relays)
+        assertEquals(original.remoteBridge, decoded.remoteBridge)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun malformedRelaysAreKeptSoValidationCanReportThem() {
+        val decoded = SuperServerConfig.fromJson(
+            """{"enabled":true,"passwordHash":"$encoded","relays":["https://bad.example","wss://ok.example"]}"""
+        )!!
+        assertEquals(2, decoded.relays.size)
+        assertEquals("BAD_RELAY", invalidCode(decoded.validate(47_001)))
+    }
+
+    @Test
+    fun sameRuntimePolicyIgnoresOnlyReferenceFields() {
+        val base = config()
+        assertTrue(base.sameRuntimePolicy(base.copy(npub = validNpub)))
+        assertTrue(base.sameRuntimePolicy(base.copy(relays = listOf("wss://a.example"))))
+        assertTrue(base.sameRuntimePolicy(base.copy(remoteBridge = RemoteBridgeHint("vps"))))
+        assertFalse(base.sameRuntimePolicy(base.copy(port = 47_003)))
+        assertFalse(base.sameRuntimePolicy(base.copy(auth = AuthMode.KEY)))
+        assertFalse(base.sameRuntimePolicy(base.copy(enabled = false)))
+        assertFalse(base.sameRuntimePolicy(base.copy(maxBodyBytes = 4_096)))
+        assertFalse(
+            base.sameRuntimePolicy(
+                base.copy(lightning = LightningSettings(LightningKind.LNBITS, "https://x.example"))
+            )
+        )
     }
 }
