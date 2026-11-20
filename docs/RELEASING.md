@@ -24,8 +24,8 @@ compares numerically, so `0.10.0` is correctly newer than `0.9.0`.
 tools/run-gates
 ```
 
-That builds both debug APKs, runs both JVM suites, all six gate scripts and
-lint, in dependency order.
+That builds both debug APKs, runs both JVM suites, all five gate scripts and
+lint, in dependency order (eight steps in total).
 
 ## 3. Release with the runtime included
 

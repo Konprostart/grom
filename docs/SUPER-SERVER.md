@@ -1,0 +1,293 @@
+# Super server — operator guide
+
+The super server is Grom's optional public data plane: a second HTTP listener on
+`/v1/*` that can be bound to loopback, the LAN or every interface, with its own
+credential. The control plane on `/grom/v1/*` is unchanged and stays
+loopback-only (S1-R010, S2-R001).
+
+It is **off by default** and **loopback-only** until an operator changes it. It
+is specified in [`specs/S5-super-server.md`](specs/S5-super-server.md); this page
+is how to run it.
+
+## 1. Enable it in the app
+
+The **Public API** card is the access card. Every row is a tap target:
+
+| row | what it does |
+|---|---|
+| **Enable** | Turns the listener on or off. On is refused unless a password or key already exists; the password dialog opens instead. |
+| **Bind** | Cycles loopback → LAN → all interfaces. A non-loopback choice is refused without a credential. Choosing *all interfaces* shows a warning to put a TLS terminator in front. |
+| **Auth** | Cycles password → key → both. Selecting password with no password set, or key with no keys, is refused. |
+| **Password** | Sets a password (at least 8 characters) or clears it. Only a PBKDF2 hash is stored. |
+| **API keys** | Generates an Ed25519 key pair, or removes all keys. The private seed is shown once, in base64url, and copied to the clipboard; it is never stored by Grom. It also lists the key ids already registered. |
+| **Lightning** | Sets the LNbits HTTPS base URL and the API key. The key field may be left blank to keep the stored key. *Clear* removes the backend. |
+
+Changes are applied through the running server. The app writes the configuration
+file first and then calls `reloadSuperServer()` (IPC API 2, S4-R029), which
+rebuilds only the data-plane listener; the control plane and the agent are not
+restarted. If the server is not running, the toast says the reload failed and
+the saved file takes effect the next time the server starts. Enabling or
+changing access requires the server role to be running to take effect
+immediately.
+
+A reload builds a new session store, rate limiter and nonce cache. **Every
+signed-in session is invalidated by any access change.**
+
+## 2. The configuration file
+
+Path: `<files>/grom/super-server.json`, i.e. under the app's private data
+directory, next to `grom-token`, `node/` and `audit/`. The app writes it
+atomically (temp file, owner-only permissions, rename over the old one) and
+refuses to load a file larger than 64 KiB. A corrupt, oversized or non-object
+file falls back to the safe defaults and the reason appears in
+`super.error`; it can never turn into an open listener.
+
+```json
+{
+  "version": 1,
+  "enabled": false,
+  "bind": "LOOPBACK",
+  "port": 47002,
+  "auth": "BOTH",
+  "passwordHash": "pbkdf2-sha256$150000$<base64-salt>$<base64-derived-key>",
+  "keys": [
+    {
+      "keyId": "<16-hex-key-id>",
+      "label": "<label>",
+      "publicKey": "<base64-32-byte-ed25519-public-key>",
+      "enabled": true
+    }
+  ],
+  "lightning": {
+    "kind": "none",
+    "baseUrl": "",
+    "timeoutMs": 8000,
+    "apiKeySealed": "<base64-sealed-api-key-or-null>"
+  },
+  "acknowledgePublicBind": false,
+  "sessionTtlMs": 43200000,
+  "maxBodyBytes": 65536,
+  "maxConnections": 16,
+  "maxSseClients": 4
+}
+```
+
+Field notes:
+
+- `bind` is `LOOPBACK`, `LAN` or `PUBLIC`; `port` is an integer; `auth` is
+  `PASSWORD`, `KEY` or `BOTH`.
+- `passwordHash` is the encoded PBKDF2 value, never a password and never
+  reversible. `keys[].publicKey` is the 32-byte Ed25519 public key in standard
+  or URL-safe base64. A supplied `keyId` is used as-is; when it is omitted it is
+  derived as the first 8 bytes of the key's SHA-256, as 16 lowercase hex
+  characters.
+- `lightning.apiKeySealed` is **AES-256-GCM ciphertext produced by the Android
+  Keystore** (`SecretBox`, alias `grom-super-secrets`), base64 of
+  `version(1) || ivLength(1) || iv || ciphertext+tag`. The plaintext backend key
+  never reaches the file. A value sealed by a different or deleted keystore key
+  cannot be opened; the backend is then reported unconfigured rather than
+  guessed. Only the app's Lightning dialog produces a valid value, so do not
+  hand-write this field.
+- `lightning.kind` is the lowercase wire name: `none` or `lnbits`.
+- `acknowledgePublicBind` must be `true` for `PUBLIC`; the app sets it when you
+  cycle to *all interfaces*.
+- Bounds: `port` 1–65535 and different from the control port; `maxBodyBytes`
+  1024–65536; `maxConnections` 1–64; `maxSseClients` 1–16; `sessionTtlMs`
+  1 minute–7 days; Lightning `timeoutMs` 1–30 s.
+- Unknown or malformed individual values fall back to defaults. A typo in
+  `bind` therefore yields `LOOPBACK`, not an error; check `super.error` and the
+  status address rather than assuming the file was honoured.
+- `version` is written for future format changes and is not currently read.
+
+## 3. curl recipes
+
+Replace `<password>` and `<token>`; never put a real credential in a file that
+is committed or shared.
+
+```bash
+export BASE=http://127.0.0.1:47002
+
+# health — no credential, no secrets
+curl -s "$BASE/v1/health"
+
+# login (BOTH or PASSWORD mode)
+curl -s -X POST "$BASE/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"<password>"}'
+
+# keep the token for the calls below
+export TOKEN=$(curl -s -X POST "$BASE/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"<password>"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+
+# status and plugin inventory
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status"
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/plugins"
+
+# agent plugin: status, then a whitelisted op
+curl -s -X POST "$BASE/v1/plugins/agent/rpc" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"op":"status","args":{}}'
+curl -s -X POST "$BASE/v1/plugins/agent/rpc" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"op":"kv.put","args":{"key":"k","value":"v"}}'
+
+# lightning plugin: measured balance, then an invoice
+curl -s -X POST "$BASE/v1/plugins/lightning/rpc" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"op":"balance","args":{}}'
+curl -s -X POST "$BASE/v1/plugins/lightning/rpc" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"op":"invoice.create","args":{"amountMsat":1000000,"memo":"<memo>"}}'
+
+# server-sent events: -N disables buffering
+curl -N -H "Authorization: Bearer $TOKEN" "$BASE/v1/events"
+
+# logout
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "$BASE/v1/auth/logout"
+```
+
+With `bind=LAN` or `PUBLIC`, use the address the status document reports instead
+of `127.0.0.1`. On an Android device you can reach a loopback listener through
+`adb forward tcp:47002 tcp:47002`.
+
+## 4. Signing requests with Ed25519
+
+`auth=KEY` (or `BOTH`) accepts requests signed with a key the operator
+registered. The server never sees the private key.
+
+Register a key generated outside the app. The key id is the first 8 bytes of
+SHA-256 over the raw public key, as 16 lowercase hex characters.
+
+```bash
+# 1. key pair (OpenSSL 3.x)
+openssl genpkey -algorithm ed25519 -out grom-key.pem
+
+# 2. raw 32-byte public key, base64 — paste into keys[].publicKey
+openssl pkey -in grom-key.pem -pubout -outform DER | tail -c 32 | base64
+
+# 3. key id — paste into keys[].keyId
+openssl pkey -in grom-key.pem -pubout -outform DER | tail -c 32 \
+  | sha256sum | cut -c1-16
+```
+
+Write both values into `super-server.json` and restart the server: a key
+generated outside the app cannot be imported through the UI, and a hand-edited
+file is read at the next start. The app rewrites the whole file from its own
+in-memory copy whenever an access row is tapped, so do not edit the file by hand
+while the app is holding a different copy. Then sign a request:
+
+```bash
+export BASE=http://127.0.0.1:47002
+export KEY_ID=<16-hex-key-id>
+PATH_=/v1/plugins/agent/rpc
+BODY='{"op":"status","args":{}}'
+TS=$(date +%s)
+NONCE=$(openssl rand -base64 24 | tr -d '+/=\n')
+
+# Canonical string: exactly six lines, no trailing newline after the digest.
+BODY_HASH=$(printf '%s' "$BODY" | sha256sum | awk '{print $1}')
+printf 'grom-ed25519-v1\nPOST\n%s\n%s\n%s\n%s' \
+  "$PATH_" "$TS" "$NONCE" "$BODY_HASH" > canonical.txt
+
+SIG=$(openssl pkeyutl -sign -rawin -inkey grom-key.pem -in canonical.txt \
+  | base64 | tr -d '\n')
+
+curl -s -X POST "$BASE$PATH_" \
+  -H "Content-Type: application/json" \
+  -H "X-Grom-Key: $KEY_ID" \
+  -H "X-Grom-Timestamp: $TS" \
+  -H "X-Grom-Nonce: $NONCE" \
+  -H "X-Grom-Signature: $SIG" \
+  -d "$BODY"
+```
+
+The canonical string must match **byte-for-byte** (S5-R017):
+
+```
+grom-ed25519-v1
+POST
+/v1/plugins/agent/rpc
+1700000000
+<nonce>
+<sha256 hex of the body>
+```
+
+- The method is upper-cased; the other lines are verbatim.
+- The path is the decoded request path with the query string removed and
+  trailing slashes trimmed. Do not sign the query string, and do not put a
+  state-changing parameter in it.
+- The body digest covers the exact UTF-8 bytes sent, including whitespace. If
+  the shell adds or drops a character, the signature fails.
+- Timestamp must be within 300 s of the device clock; a nonce is single-use.
+- `openssl pkeyutl -sign -rawin` must be available (OpenSSL 3.x); on older tools
+  use any Ed25519 implementation that returns the raw 64-byte signature.
+
+## 5. Network exposure
+
+- **Loopback (default).** `127.0.0.1` only. Reachable from the device itself, or
+  from a workstation through `adb forward`. Nothing is exposed to the network.
+- **LAN.** Binds the device's *current* site-local IPv4 address. The address is
+  chosen when the server starts; after a Wi-Fi or network change,
+  restart/reload so the new address is picked. If no usable address exists the
+  server refuses with `NO_LAN_ADDRESS` rather than binding something else.
+- **PUBLIC.** Binds `0.0.0.0`, every IPv4 interface, and requires
+  `acknowledgePublicBind=true`. It still requires a credential. This is the
+  mode to use behind a reverse proxy, not the mode to leave running.
+
+Grom speaks plain HTTP in-process. Put a TLS terminator (Caddy, nginx) or an
+encrypted tunnel (WireGuard, Tailscale, an SSH tunnel) in front of the port
+**before** exposing it. Without one:
+
+- Password login over plain HTTP sends the password on the wire, readable by
+  anyone on the path. The session token that follows is equally readable.
+- Ed25519 signatures do not reveal the private key and a captured request cannot
+  be replayed, but the request and response bodies are still in clear text.
+
+Behind CGNAT a phone has no reachable inbound address at all. Binding `PUBLIC`
+or `LAN` does not change that. Use a tunnel initiated **from the device** to a
+host with a public address. There is no port-forwarding recipe that fixes CGNAT
+from the outside.
+
+## 6. Resource footprint
+
+| resource | bound |
+|---|---|
+| accept thread | 1 (`grom-super-accept`) |
+| request workers | 4 (`grom-super-http-1..4`) |
+| connections in flight | 16 by default, refused with `503 SERVER_BUSY` above that |
+| event streams | one thread each, 4 by default (bus admits 8) |
+| per-subscriber queue | 32 frames, dropped when full |
+| sessions | 16, least recently used evicted |
+| rate-limiter clients | 1024 IPs, least recently used evicted |
+| nonce cache | 4096 entries, 600 s window |
+
+SSE is used instead of WebSocket because the traffic is one-way server events:
+SSE is plain HTTP/1.1, so it reuses the same parser, the same auth path and the
+same `Connection: close` lifecycle, and every TLS terminator and reverse proxy
+forwards it without an upgrade handshake or a framing library (D46). Grom opens
+no connection of its own for events; the client does.
+
+## 7. Troubleshooting
+
+| symptom | code | meaning and fix |
+|---|---|---|
+| Listener not running, `super.error` names it | `CREDENTIAL_REQUIRED` | A non-loopback bind was chosen without a password or key, or `auth=BOTH` has neither. Set a credential, or go back to loopback. |
+| Listener not running | `PUBLIC_NOT_ACKNOWLEDGED` | `bind=PUBLIC` without `acknowledgePublicBind=true`. Use the app (it sets it) or set the field deliberately. |
+| Listener not running | `NO_LAN_ADDRESS` | LAN mode and no usable IPv4 address. Connect to Wi-Fi/Ethernet and restart/reload. |
+| Listener not running | `BIND_FAILED: <class>` | The socket could not be bound, typically the port is in use. Change the port; there is no retry on another address. |
+| Login answers `403` | `PASSWORD_AUTH_DISABLED` | `auth=KEY`; use a signed request, or change the mode to `BOTH`. |
+| Login answers `429` | `TOO_MANY_REQUESTS` | Rate limit or 5 failed logins in 60 s (300 s lockout). Wait for `Retry-After`, then retry. |
+| Any endpoint answers `401` | `UNAUTHORIZED` | Missing, malformed, expired or wrong credential; a signed request with a wrong canonical string, stale timestamp or reused nonce looks identical by design. Check the header set and the canonical bytes. A reload also invalidates sessions. |
+| `503 TOO_MANY_STREAMS` | | Four event streams are already open. Close one; streams end on their own after 30 minutes. |
+| `503 SERVER_BUSY` | | 16 connections in flight. Retry later; the server does not queue. |
+| `501 NOT_SUPPORTED` | | The configured backend does not implement the capability (see `docs/LIGHTNING.md`). |
+
+## 8. What is tested, and what is not
+
+The data plane has JVM unit and integration tests only. `SuperServerIntegrationTest`
+binds `127.0.0.1:0` and exercises the real parser, worker pool, auth path and SSE
+writer; the auth, Lightning and transport classes have plain JVM tests. Nothing
+here has been run on a physical device or benchmarked; those tests are the only
+evidence. The UI path, the Android Keystore seal and the actual network bind of a
+LAN/PUBLIC address are code-reviewed, not measured.

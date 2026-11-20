@@ -3,6 +3,18 @@
 Normative requirements for Grom F1. IDs are stable; do not renumber.
 `MUST`/`MUST NOT`/`SHOULD` carry their RFC 2119 meaning.
 
+> **Amendments (D39–D48).** The public data plane specified in S5 extends the
+> product beyond one loopback listener. `S1-R001` now describes the control
+> plane; an operator may separately enable the data plane of S5 under D39 and
+> D41. `S1-R002` is narrowed, not repealed: Grom still holds no balance and
+> decides no payment, and the Lightning adapter (D43) only forwards to an
+> operator-configured backend. `S1-R003` is narrowed by D48: the process may
+> open a connection to a backend URL the operator supplied at runtime and must
+> never compile one in. `S1-R010` applies unchanged to the control plane; for the
+> data plane the bind is chosen by `SuperBindPolicy`, and a non-loopback choice
+> requires a credential and, for the wildcard, an explicit acknowledgement
+> (D41). No other S1 requirement changes.
+
 ## 1. Purpose
 
 ### S1-R001

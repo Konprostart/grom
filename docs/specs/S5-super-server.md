@@ -1,0 +1,309 @@
+# S5 — Super server (public data plane)
+
+The separately configurable data plane. The control plane in S2 is untouched:
+`/grom/v1/*` stays loopback-only. This document is normative for `/v1/*`.
+
+## 1. Planes and purpose
+
+### S5-R001
+Grom serves two independent HTTP planes from one process:
+
+| plane | prefix | bind | credential |
+|---|---|---|---|
+| control | `/grom/v1/*` | loopback only (S2-R001, S1-R010) | bearer token (S2-R010) |
+| data | `/v1/*` | `LOOPBACK`, `LAN` or `PUBLIC` (S5-R005) | password session or Ed25519 signature (S5-R019) |
+
+The data plane is what D39 calls the super server. It exposes the agent and the
+configured plugins; it does not expose the audit log, the token endpoints or the
+supervisor controls. Agent state appears only as the health subset inside
+`/v1/status`.
+
+### S5-R002
+The data plane MUST be disabled by default: `enabled=false`, bind `LOOPBACK`,
+port `47002`, no listener. Enabling it and moving it off loopback are two
+separate, explicit operator decisions. Neither is a default.
+
+### S5-R003
+A refused, failed or stopped data plane MUST NOT stop, restart or degrade the
+control plane or the agent. The reason MUST be reported in
+`GET /grom/v1/status` under `super.error` and MUST NOT be hidden by binding
+another address.
+
+### S5-R004
+The data plane is versioned `v1`. `GET /v1/health` returns `api: 1` and
+`service: "grom-super"`. Additive changes keep `v1`; removals require `v2`. This
+version is independent of the control-plane `api` field and of
+`IGromServer.apiVersion()` (S4-R028).
+
+## 2. Bind policy and configuration
+
+### S5-R005
+Exactly three modes exist:
+
+| mode | address | requirement |
+|---|---|---|
+| `LOOPBACK` | `127.0.0.1` | none; the default |
+| `LAN` | the current site-local IPv4 address | a credential (S5-R008) |
+| `PUBLIC` | `0.0.0.0` (all IPv4 interfaces) | a credential and `acknowledgePublicBind=true` |
+
+IPv6 binds are not offered. The hostname is never resolved; there is no
+`InetAddress.getByName` on the bind path.
+
+### S5-R006
+`LAN` MUST prefer a private (site-local) IPv4 address and MAY fall back to any
+other non-loopback IPv4 address. Loopback, wildcard and link-local addresses are
+never selected. When no candidate exists, start MUST be refused with
+`NO_LAN_ADDRESS` and no listener. The address is resolved at start time; an
+address change requires a restart or reload.
+
+### S5-R007
+The data-plane port defaults to `47002`; the control-plane port defaults to
+`47001` (D23). The two ports MUST differ. A configured data-plane port MUST be
+in `1..65535`.
+
+### S5-R008
+`SuperServerConfig.validate(controlPort)` MUST run before any socket is created
+and MUST refuse with one of these stable codes:
+
+| code | condition |
+|---|---|
+| `BAD_PORT` | port outside `1..65535` |
+| `PORT_CONFLICT` | data-plane port equals the control-plane port |
+| `BAD_BODY_LIMIT` | `maxBodyBytes` outside `1024..65536` |
+| `BAD_CONNECTION_LIMIT` | `maxConnections` outside `1..64` |
+| `BAD_SSE_LIMIT` | `maxSseClients` outside `1..16` |
+| `BAD_SESSION_TTL` | `sessionTtlMs` outside 1 minute .. 7 days |
+| `CREDENTIAL_REQUIRED` | non-loopback bind with no credential, or `auth=BOTH` with no credential |
+| `PUBLIC_NOT_ACKNOWLEDGED` | `bind=PUBLIC` without `acknowledgePublicBind=true` |
+| `PASSWORD_REQUIRED` | `auth=PASSWORD` with no password hash |
+| `KEY_REQUIRED` | `auth=KEY` with no enabled key |
+| `BAD_KEY` | blank `keyId`, or a public key that is not 32 bytes of base64 |
+| `DUPLICATE_KEY` | two entries share a `keyId` |
+| `BAD_BACKEND_TIMEOUT` | Lightning timeout outside `1..30` seconds |
+| `INSECURE_BACKEND_URL` | Lightning `baseUrl` does not start with `https://` |
+| `BAD_BACKEND_URL` | URL longer than 512 characters or containing whitespace |
+
+The check order is: port, conflict, the three limit bounds, session TTL,
+bind/credential rules, auth-mode rules, keys, backend. The first failure wins.
+A refusal MUST leave the server unbound, record the code and message in
+`lastError`, and append a `super.refused` audit entry with the code as detail. A
+stored password hash that cannot be decoded MUST refuse with `BAD_PASSWORD_HASH`.
+A socket-bind failure MUST record `BIND_FAILED: <exception class>` and append
+`super.bind.failed`. Neither case retries on a different address, and no case
+starts the server on a configuration it could not honour.
+
+## 3. Transport and routing
+
+### S5-R009
+The protocol is HTTP/1.1; a request with any other version is answered `505`.
+`Connection: close` is the only lifecycle; keep-alive is not implemented and no
+connection state survives one response. JSON responses carry
+`Content-Type: application/json; charset=utf-8`, `Content-Length`,
+`Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. A request that
+declares a content type other than `application/json` is answered `415`; a
+missing content type is accepted and treated as JSON.
+
+### S5-R010
+Routing order is fixed. `/v1/health` is answered before any credential work; the
+rate limiter runs before login; authentication runs before path resolution, so
+an unauthenticated caller cannot distinguish existing from non-existing paths
+and learns nothing about key ids. An authenticated request to an unknown path is
+`404 NOT_FOUND`. A known path with the wrong method is `405
+METHOD_NOT_ALLOWED` with an `Allow` header. Every error body is
+`{"ok":false,"error":{"code":"...","message":"..."}}`, where `code` is a stable
+machine token and `message` is human text that MAY change. A response body MUST
+NOT contain a stack trace, a file path or an exception class name.
+
+### S5-R011
+Requests are bounded before parsing: at most 8 KiB of headers (else `431`), at
+most 64 KiB of body (else `413`), no `Transfer-Encoding` (else `400`). After
+parsing, a body larger than the configured `maxBodyBytes` is answered
+`413 PAYLOAD_TOO_LARGE`. A connection idle for 10 s MUST be closed.
+
+### S5-R012
+At most `maxConnections` sockets (default `16`) may be in flight; a connection
+over the limit is refused immediately with `503 SERVER_BUSY` and MUST NOT wait in
+an application queue. Requests are served by a fixed pool of 4 worker threads; no
+handler may block the accept loop. At most `maxSseClients` event streams (default
+`4`) may be open, refused with `503 TOO_MANY_STREAMS` above that. The in-process
+bus additionally admits at most 8 subscribers, so the smaller of the two bounds
+takes effect. A stream MUST end after 30 minutes and MUST emit a `: ping`
+heartbeat whenever no event has been written for 15 s.
+
+## 4. Authentication
+
+### S5-R013
+Passwords are stored only as `pbkdf2-sha256$<iterations>$<base64salt>$<base64hash>`,
+derived with PBKDF2-HMAC-SHA256, a fresh 16-byte salt and 150000 iterations by
+default, producing a 32-byte key. Comparison MUST be constant time
+(`MessageDigest.isEqual`). A plaintext password MUST never be written to the
+configuration, the audit log or the process log. The minimum password length is
+8 characters. A login attempt with a blank password MUST cost the same as one
+with a candidate, so response time does not disclose whether a candidate was
+supplied.
+
+### S5-R014
+A session token is 32 random bytes, base64url without padding (43 characters).
+Only its SHA-256 hex digest is kept, in memory; the token MUST never be logged or
+persisted. The default TTL is 12 h (configurable 1 minute .. 7 days, see
+S5-R008) and at most 16 sessions are held, least-recently-used evicted first. A
+restart or reload builds a new store and therefore invalidates every session.
+
+### S5-R015
+Login failures are limited separately from request rate: 5 failures inside 60 s
+lock the client out for 300 s. A success clears the client's history. The login
+limiter is checked before the credential mode is examined, so a locked client
+gets `429` even when password auth is disabled.
+
+### S5-R016
+Every path except `/v1/health` is subject to a per-client token bucket: capacity
+60, refill 2 tokens per second, keyed by client IP address (never by credential).
+Clients are held in an access-ordered map bounded at 1024 entries. An exhausted
+bucket returns `429 TOO_MANY_REQUESTS` with `Retry-After` (at least 1 second,
+capped at 3600; the login limiter caps at 86400).
+
+### S5-R017
+Signed requests carry exactly four headers:
+
+| header | value |
+|---|---|
+| `X-Grom-Key` | the registered `keyId`; it is derived as the first 16 lowercase hex characters of SHA-256 over the public key when the configuration leaves it blank |
+| `X-Grom-Timestamp` | Unix seconds |
+| `X-Grom-Nonce` | `[A-Za-z0-9_-]{8,128}` |
+| `X-Grom-Signature` | standard or URL-safe base64 of the 64-byte Ed25519 signature |
+
+The canonical string is exactly six lines, with no trailing newline:
+```
+grom-ed25519-v1
+<METHOD uppercase>
+<path>
+<timestamp>
+<nonce>
+<sha256-hex of body>
+```
+The body digest is lowercase hex of SHA-256 over the exact UTF-8 body; an empty
+body hashes the empty string. The path is the request path with the query string
+removed, percent-decoded, and trailing slashes trimmed (the router normalizes
+before verification). It MUST match byte-for-byte; a single byte of difference
+invalidates the signature. Query strings are NOT part of the signed string, so
+every state-changing parameter MUST travel in the JSON body and MUST NOT be read
+from the query string.
+
+### S5-R018
+A timestamp more than 300 s away from the server clock MUST be rejected. A
+malformed nonce, unknown key id, malformed signature or a signature that does not
+verify MUST be rejected. The nonce MUST be remembered only after the signature
+verifies; a nonce seen inside a 600 s window MUST be rejected as a replay
+(`SIGNATURE_REPLAYED`). The nonce cache holds at most 4096 entries. The verifier
+distinguishes these reasons internally; S5-R019 keeps the response uniform, so
+the wire answer is `401 UNAUTHORIZED` in every case.
+
+### S5-R019
+Three modes exist: `PASSWORD` (session tokens only), `KEY` (Ed25519 signatures
+only) and `BOTH` (either). `BOTH` is the default. A session token is accepted when
+the mode is not `KEY`; a signature is accepted when the mode is not `PASSWORD`. A
+session token may be presented as `Authorization: Bearer <token>` or, for local
+tooling, as `X-Grom-Token: <token>`. A request that presents neither, or a bad
+one, is `401 UNAUTHORIZED` with the same body in every case. On the login
+endpoint a wrong password is `401 INVALID_CREDENTIALS` (S5-R024); elsewhere every
+failure is the uniform `401`.
+
+## 5. Plugins and endpoints
+
+### S5-R020
+The plugin registry is fixed in code at start time. There is no dynamic class
+loading, no plugin directory and no network-installed plugin. Plugin ids match
+`^[a-z][a-z0-9-]{1,31}$` and are unique. This build registers exactly two:
+`agent` and `lightning`.
+
+### S5-R021
+Every plugin answers `GET /v1/plugins/{id}` and `GET /v1/plugins` with
+`{id,title,description,capabilities,status}`, where `capabilities` is a sorted
+list and `status` is a side-effect-free snapshot containing no secret. The RPC
+body is `{"op":"<name>","args":{...}}`; `op` is required and at most 64
+characters, and `args` MUST be an object and defaults to `{}`. A missing `op` is
+`400 BAD_REQUEST`.
+
+### S5-R022
+A plugin that cannot serve an operation MUST fail honestly: `501 NOT_SUPPORTED`
+naming the capability for a capability the backend does not implement; `503
+LIGHTNING_UNCONFIGURED` when no backend is configured; `503 LIGHTNING_UNAVAILABLE`
+when the configured backend cannot be reached or answered garbage. A balance is
+either measured by the backend or absent; Grom MUST NOT fabricate a balance, a
+zero, a pending state or an invoice.
+
+### S5-R023 — `GET /v1/health`
+Unauthenticated and not rate-limited. Returns `200`:
+```json
+{"ok":true,"service":"grom-super","api":1,"uptimeMs":12345}
+```
+It MUST contain no token, no password hash, no key id, no backend URL and no
+device identifier. Any method other than `GET` on this path is `405`.
+
+### S5-R024 — `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/status`
+Login is unauthenticated but rate-limited. Body `{"password":"<password>"}`; a
+body that is not a JSON object is `400 BAD_REQUEST`. On success it returns `200`:
+```json
+{"ok":true,"token":"<token>","expiresAtMs":1700000000000}
+```
+A wrong password returns `401 INVALID_CREDENTIALS`; password auth disabled
+(`auth=KEY`) returns `403 PASSWORD_AUTH_DISABLED`; a locked client returns
+`429 TOO_MANY_REQUESTS` with `Retry-After`. Logout is authenticated, revokes the
+presented session token and returns `{"ok":true}`; revoking an unknown token is
+not an error. Status is authenticated and returns the health fields plus `auth`,
+`bind`, `plugins`, `address`, `port`, `limits` (`maxBodyBytes`,
+`maxConnections`, `maxSseClients`), `agent` (the control-plane health document)
+and `streams` (the current subscriber count). It contains no credential.
+
+### S5-R025 — plugin endpoints
+`GET /v1/plugins` returns `{"ok":true,"plugins":[...]}`. `GET /v1/plugins/{id}`
+returns `{"ok":true}` merged with the description; an id that is not registered
+is `404 UNKNOWN_PLUGIN`. `POST /v1/plugins/{id}/rpc` returns on success:
+```json
+{"ok":true,"plugin":"agent","op":"status","result":{...}}
+```
+and, on a plugin failure, the failure's HTTP status with:
+```json
+{"ok":false,"plugin":"lightning","op":"balance","error":{"code":"...","message":"..."}}
+```
+Paths below `/v1/plugins/` that do not resolve to `{id}` or `{id}/rpc` are `404
+NOT_FOUND`.
+
+### S5-R026 — `GET /v1/events`
+Authenticated server-sent events; a non-`GET` method is `405`. The stream opens
+with `retry: 5000` followed by a `hello` event, uses `event:`/`data:` frames
+separated by a blank line, sends `: ping` as the heartbeat, and ends with a `bye`
+event when the 30-minute lifetime expires or the server stops. Each subscriber
+owns a bounded queue of 32 frames; when it is full the frame is dropped for that
+subscriber rather than blocking the publisher.
+
+## 6. Audit
+
+### S5-R027
+Data-plane lifecycle events MUST go through the existing hash-chained audit store
+(D10, S2-R033): `super.start` on a successful bind, `super.stop` on stop,
+`super.reload` on reload, `super.refused` on a policy refusal and
+`super.bind.failed` on a socket failure. The detail MUST NOT contain a
+credential. Agent operations relayed through the `agent` plugin are audited by
+the control-plane runtime as `agent.exec`, exactly as an HTTP agent call is.
+
+## 7. Non-goals
+
+### S5-R028
+The data plane explicitly does not provide: TLS in the process (S5-R029); order
+matching; custody of funds; storage of wallet keys or seeds; dynamic plugin
+loading; IPv6 binds; WebSocket (D46).
+
+### S5-R029
+Grom terminates no TLS. An operator exposing the data plane off loopback MUST
+put a TLS terminator or an encrypted tunnel in front of it. The process speaks
+plain HTTP on the configured address and makes no claim to confidentiality
+without one.
+
+## 8. Conformance
+
+### S5-R030
+The data plane is covered by JVM unit and integration tests only:
+`SuperServerIntegrationTest` runs over a real loopback socket, and the auth,
+Lightning and transport units are plain JVM tests. No device run, benchmark or
+CI result is claimed for this feature.

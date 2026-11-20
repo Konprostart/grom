@@ -20,6 +20,7 @@ import app.grom.server.http.LoopbackHttpServer
 import app.grom.server.http.Router
 import app.grom.server.service.GromPrefs
 import app.grom.server.store.SecureStore
+import app.grom.server.superserver.SuperServerHost
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -79,6 +80,21 @@ class ServerRuntime(
 
     val port: Int get() = GromPrefs.port(context)
 
+    /**
+     * The public data plane (D39). It is built lazily and started only in the
+     * server role; the peripheral role never constructs a listening path.
+     */
+    private val superServer: SuperServerHost by lazy {
+        SuperServerHost(
+            context = context,
+            controlPort = port,
+            agentHealth = { health() },
+            agentExec = { op, body -> exec(op, body) },
+            audit = { action, detail -> safeAudit(action, detail) },
+            logger = { line -> log(line) }
+        )
+    }
+
     fun isRunning(): Boolean = running
 
     // ---------------------------------------------------------------- lifecycle
@@ -112,6 +128,13 @@ class ServerRuntime(
             httpServer = server
             running = true
 
+            // The public data plane is independent of the Node agent: it must
+            // stay usable when the runtime is missing, and its own start failure
+            // is reported rather than taking the control plane down.
+            if (BuildConfig.GROMSERVER) {
+                superServer.start()
+            }
+
             scheduler.scheduleWithFixedDelay({ tick() }, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS)
 
             if (!policy.isQuarantined()) {
@@ -126,6 +149,9 @@ class ServerRuntime(
             if (!running) return
             safeAudit("server.stop", "")
             running = false
+            if (BuildConfig.GROMSERVER) {
+                superServer.stop()
+            }
             httpServer?.stop()
             httpServer = null
             agent?.stop()
@@ -152,7 +178,7 @@ class ServerRuntime(
 
     // ------------------------------------------------------------------ GromApi
 
-    override fun apiVersion(): Int = 1
+    override fun apiVersion(): Int = 2
 
     override fun authorize(candidate: String?): Boolean =
         candidate != null && Token.matches(token, candidate)
@@ -179,7 +205,12 @@ class ServerRuntime(
                 "runtimeDir" to runtime().binaryDirectory.absolutePath,
                 "missing" to missing,
                 "agentPort" to agentPort,
-                "lastError" to lastError
+                "lastError" to lastError,
+                "super" to if (BuildConfig.GROMSERVER) {
+                    superServer.status()
+                } else {
+                    mapOf("enabled" to false, "running" to false, "role" to "peripheral")
+                }
             )
         }
     }
@@ -276,6 +307,28 @@ class ServerRuntime(
             backoffUntil = 0L
             GromPrefs.setQuarantined(context, null)
             audited("agent.reset", "quarantine cleared")
+            return status()
+        }
+    }
+
+    /**
+     * Re-reads the persisted super-server configuration and restarts only that
+     * listener. The control plane and the agent are untouched, so an operator
+     * can change exposure without dropping the supervisor.
+     */
+    fun reloadSuperServer(): Map<String, Any?> {
+        synchronized(lock) {
+            if (!BuildConfig.GROMSERVER) {
+                throw ApiException(400, "PERIPHERAL_ROLE", "this build does not run the server role")
+            }
+            if (!running) {
+                throw ApiException(
+                    503,
+                    "SERVER_STOPPED",
+                    "start the server before reloading the access configuration"
+                )
+            }
+            superServer.reload()
             return status()
         }
     }

@@ -117,6 +117,38 @@ internal fun Context.actionRow(
     )
 }
 
+/**
+ * Same row, but returns the value [TextView] so the activity can update it in
+ * place on every refresh instead of rebuilding the card.
+ */
+internal fun Context.actionRowState(
+    title: String,
+    palette: Palette,
+    onClick: () -> Unit
+): Pair<LinearLayout, TextView> {
+    val value = text("", 13f, palette.muted, gravity = Gravity.END)
+    val row = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(13), 0, dp(13))
+        isClickable = true
+        isFocusable = true
+        background = RippleDrawable(ColorStateList.valueOf(palette.ripple), null, null)
+        setOnClickListener { onClick() }
+        addView(
+            text(title, 15f, palette.onSurface),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        addView(value)
+        addView(
+            text("\u203A", 20f, palette.muted, gravity = Gravity.END).apply {
+                setPadding(dp(10), 0, 0, 0)
+            }
+        )
+    }
+    return row to value
+}
+
 internal fun Context.divider(palette: Palette): View = View(this).apply {
     setBackgroundColor(palette.border)
     layoutParams = LinearLayout.LayoutParams(

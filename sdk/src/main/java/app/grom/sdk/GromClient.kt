@@ -103,6 +103,7 @@ class GromClient(private val context: Context) {
         const val SERVICE_CLASS: String = "app.grom.server.service.GromService"
         const val ACTION: String = "app.grom.sdk.ipc.GROM_SERVER"
         const val PERMISSION: String = "app.grom.sdk.ipc.BIND_GROMSERVER"
-        const val API_VERSION: Int = 1
+        /** API 2 adds [IGromServer.reloadSuperServer] (D39). */
+        const val API_VERSION: Int = 2
     }
 }

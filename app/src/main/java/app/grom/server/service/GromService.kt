@@ -105,6 +105,11 @@ class GromService : Service() {
             requireSameSigner()
             runtime.rotateToken()
         }
+
+        override fun reloadSuperServer() = guard {
+            requireSameSigner()
+            runtime.reloadSuperServer()
+        }
     }
 
     /**

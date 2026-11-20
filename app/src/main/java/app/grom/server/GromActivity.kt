@@ -3,6 +3,9 @@ package app.grom.server
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -10,19 +13,31 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import app.grom.server.core.BindMode
 import app.grom.server.http.JsonParser
 import app.grom.server.service.GromPrefs
+import app.grom.server.store.AndroidKeystoreSecretBox
+import app.grom.server.superserver.AuthMode
+import app.grom.server.superserver.LightningKind
+import app.grom.server.superserver.LightningSettings
+import app.grom.server.superserver.SuperServerConfig
+import app.grom.server.superserver.SuperServerConfigStore
+import app.grom.server.superserver.auth.Ed25519
+import app.grom.server.superserver.auth.PasswordHash
 import app.grom.server.ui.GromTheme
 import app.grom.server.ui.Palette
 import app.grom.server.ui.actionRow
+import app.grom.server.ui.actionRowState
 import app.grom.server.ui.card
 import app.grom.server.ui.divider
 import app.grom.server.ui.dp
@@ -34,6 +49,8 @@ import app.grom.server.ui.text
 import app.grom.server.update.UpdateChecker
 import app.grom.sdk.GromClient
 import app.grom.sdk.ipc.IGromServer
+import java.io.File
+import java.util.Base64
 
 /**
  * The operator surface: monochrome, one status, one primary action.
@@ -65,6 +82,17 @@ class GromActivity : Activity() {
     private lateinit var updateAction: TextView
     private lateinit var themeAction: TextView
 
+    private val superStore by lazy { SuperServerConfigStore(File(filesDir, "grom")) }
+    private val secretBox by lazy { AndroidKeystoreSecretBox() }
+    private var superConfig: SuperServerConfig = SuperServerConfig.defaults()
+    private lateinit var superDetail: TextView
+    private lateinit var superEnableRow: Pair<LinearLayout, TextView>
+    private lateinit var superBindRow: Pair<LinearLayout, TextView>
+    private lateinit var superAuthRow: Pair<LinearLayout, TextView>
+    private lateinit var superPasswordRow: Pair<LinearLayout, TextView>
+    private lateinit var superKeysRow: Pair<LinearLayout, TextView>
+    private lateinit var superLightningRow: Pair<LinearLayout, TextView>
+
     private var updateState: UpdateState = UpdateState.Idle
 
     private sealed interface UpdateState {
@@ -92,6 +120,7 @@ class GromActivity : Activity() {
         GromTheme.applyWindow(this)
         palette = GromTheme.palette(this)
         client = GromClient(this)
+        if (BuildConfig.GROMSERVER) superConfig = superStore.load()
         setContentView(buildUi())
         renderUpdate()
         requestNotificationPermission()
@@ -143,6 +172,8 @@ class GromActivity : Activity() {
         if (BuildConfig.GROMSERVER) {
             column.addView(gap(14))
             column.addView(controlCard())
+            column.addView(gap(14))
+            column.addView(superCard())
         }
 
         column.addView(gap(14))
@@ -303,6 +334,281 @@ class GromActivity : Activity() {
         return card
     }
 
+    private fun superCard(): View {
+        val card = card(palette)
+        card.addView(label(getString(R.string.ui_access), palette))
+        card.addView(gap(8))
+        card.addView(
+            text(
+                getString(R.string.access_title),
+                20f,
+                palette.onSurface,
+                android.graphics.Typeface.BOLD
+            )
+        )
+        card.addView(gap(4))
+        superDetail = text("", 13f, palette.muted)
+        superDetail.maxLines = 4
+        superDetail.ellipsize = TextUtils.TruncateAt.END
+        card.addView(superDetail)
+        card.addView(gap(4))
+
+        superEnableRow = actionRowState(getString(R.string.access_enable), palette) { toggleSuperEnabled() }
+        card.addView(superEnableRow.first)
+        card.addView(divider(palette))
+        superBindRow = actionRowState(getString(R.string.access_bind), palette) { cycleBindMode() }
+        card.addView(superBindRow.first)
+        card.addView(divider(palette))
+        superAuthRow = actionRowState(getString(R.string.access_auth), palette) { cycleAuthMode() }
+        card.addView(superAuthRow.first)
+        card.addView(divider(palette))
+        superPasswordRow = actionRowState(getString(R.string.access_password), palette) { showPasswordDialog() }
+        card.addView(superPasswordRow.first)
+        card.addView(divider(palette))
+        superKeysRow = actionRowState(getString(R.string.access_keys), palette) { showKeysDialog() }
+        card.addView(superKeysRow.first)
+        card.addView(divider(palette))
+        superLightningRow = actionRowState(getString(R.string.access_lightning), palette) { showLightningDialog() }
+        card.addView(superLightningRow.first)
+        return card
+    }
+
+    private fun renderSuper() {
+        val superStatus = status?.get("super") as? Map<*, *>
+        val error = superStatus?.get("error") as? String
+        val running = superStatus?.get("running") == true
+        val address = superStatus?.get("address") as? String ?: getString(R.string.ui_dash)
+
+        superDetail.text = when {
+            error != null -> error
+            !superConfig.enabled -> getString(R.string.access_off)
+            running -> getString(R.string.access_listening, address)
+            else -> getString(R.string.access_off)
+        }
+        superDetail.setTextColor(if (error != null) palette.negative else palette.muted)
+
+        superEnableRow.second.text =
+            if (superConfig.enabled) getString(R.string.super_on) else getString(R.string.super_off)
+        superBindRow.second.text = when (superConfig.bind) {
+            BindMode.LOOPBACK -> getString(R.string.access_bind_loopback)
+            BindMode.LAN -> getString(R.string.access_bind_lan)
+            BindMode.PUBLIC -> getString(R.string.access_bind_public)
+        }
+        superAuthRow.second.text = when (superConfig.auth) {
+            AuthMode.PASSWORD -> getString(R.string.access_auth_password)
+            AuthMode.KEY -> getString(R.string.access_auth_key)
+            AuthMode.BOTH -> getString(R.string.access_auth_both)
+        }
+        superPasswordRow.second.text = if (superConfig.passwordHash != null) {
+            getString(R.string.access_password_set)
+        } else {
+            getString(R.string.access_password_unset)
+        }
+        superKeysRow.second.text = if (superConfig.keys.isEmpty()) {
+            getString(R.string.access_keys_none)
+        } else {
+            superConfig.keys.size.toString()
+        }
+        superLightningRow.second.text = if (superConfig.lightning.kind == LightningKind.NONE) {
+            getString(R.string.access_lightning_none)
+        } else {
+            superConfig.lightning.kind.wireName
+        }
+    }
+
+    private fun toggleSuperEnabled() {
+        if (!superConfig.enabled) {
+            if (!superConfig.hasCredential()) {
+                toast(getString(R.string.access_credentials_required))
+                showPasswordDialog()
+                return
+            }
+            persistSuperConfig(superConfig.copy(enabled = true))
+        } else {
+            persistSuperConfig(superConfig.copy(enabled = false))
+        }
+    }
+
+    private fun cycleBindMode() {
+        val next = when (superConfig.bind) {
+            BindMode.LOOPBACK -> BindMode.LAN
+            BindMode.LAN -> BindMode.PUBLIC
+            BindMode.PUBLIC -> BindMode.LOOPBACK
+        }
+        if (next != BindMode.LOOPBACK && !superConfig.hasCredential()) {
+            toast(getString(R.string.access_credentials_required))
+            return
+        }
+        if (next == BindMode.PUBLIC) toast(getString(R.string.access_public_warning))
+        persistSuperConfig(
+            superConfig.copy(bind = next, acknowledgePublicBind = next == BindMode.PUBLIC)
+        )
+    }
+
+    private fun cycleAuthMode() {
+        val next = when (superConfig.auth) {
+            AuthMode.PASSWORD -> AuthMode.KEY
+            AuthMode.KEY -> AuthMode.BOTH
+            AuthMode.BOTH -> AuthMode.PASSWORD
+        }
+        if (next == AuthMode.PASSWORD && superConfig.passwordHash == null) {
+            toast(getString(R.string.access_credentials_required))
+            return
+        }
+        if (next == AuthMode.KEY && superConfig.keys.isEmpty()) {
+            toast(getString(R.string.access_credentials_required))
+            return
+        }
+        persistSuperConfig(superConfig.copy(auth = next))
+    }
+
+    /** Writes the configuration and asks the running server to rebuild the listener. */
+    private fun persistSuperConfig(updated: SuperServerConfig) {
+        val previous = superConfig
+        superConfig = updated
+        try {
+            superStore.save(updated)
+        } catch (_: Exception) {
+            superConfig = previous
+            toast(getString(R.string.access_reload_failed))
+            renderSuper()
+            return
+        }
+        val reloaded = try {
+            client.call(false) {
+                it.reloadSuperServer()
+                true
+            }
+        } catch (failure: IllegalStateException) {
+            toast(failure.message ?: getString(R.string.access_reload_failed))
+            false
+        }
+        toast(
+            getString(if (reloaded) R.string.access_saved else R.string.access_reload_failed)
+        )
+        handler.postDelayed({ refreshNow() }, 300)
+        renderSuper()
+    }
+
+    private fun showPasswordDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = getString(R.string.dialog_password_hint)
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_password_title)
+            .setView(input)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val value = input.text.toString()
+                if (value.length < PasswordHash.MIN_LENGTH) {
+                    toast(getString(R.string.dialog_password_too_short))
+                    return@setPositiveButton
+                }
+                persistSuperConfig(superConfig.copy(passwordHash = PasswordHash.create(value).value))
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                persistSuperConfig(superConfig.copy(passwordHash = null))
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun showKeysDialog() {
+        val summary = if (superConfig.keys.isEmpty()) {
+            getString(R.string.dialog_key_none)
+        } else {
+            superConfig.keys.joinToString("\n") { "${it.keyId}  ${it.label}" }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_key_title)
+            .setMessage(summary)
+            .setPositiveButton(R.string.dialog_key_generate) { _, _ -> generateApiKey() }
+            .setNeutralButton(R.string.dialog_key_remove) { _, _ ->
+                persistSuperConfig(superConfig.copy(keys = emptyList()))
+            }
+            .setNegativeButton(R.string.dialog_close, null)
+            .show()
+    }
+
+    private fun generateApiKey() {
+        val seed = Ed25519.generatePrivateSeed()
+        val publicKey = Ed25519.derivePublicKey(seed)
+        val keyId = Ed25519.keyId(publicKey)
+        val encoded = Base64.getEncoder().encodeToString(publicKey)
+        val key = app.grom.server.superserver.ApiKeyConfig(
+            keyId = keyId,
+            label = "operator",
+            publicKey = encoded
+        )
+        persistSuperConfig(superConfig.copy(keys = superConfig.keys + key))
+        showSeedDialog(seed, keyId)
+    }
+
+    private fun showSeedDialog(seed: ByteArray, keyId: String) {
+        val text = Base64.getUrlEncoder().withoutPadding().encodeToString(seed)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_key_seed_title)
+            .setMessage(getString(R.string.dialog_key_seed_body, text, keyId))
+            .setPositiveButton(R.string.dialog_key_copy) { _, _ ->
+                val clipboard = getSystemService(ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(ClipData.newPlainText("grom-key", text))
+                toast(getString(R.string.toast_key_copied))
+            }
+            .setNegativeButton(R.string.dialog_close, null)
+            .show()
+    }
+
+    private fun showLightningDialog() {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), 0)
+        }
+        val url = EditText(this).apply {
+            hint = getString(R.string.dialog_lightning_url)
+            setText(superConfig.lightning.baseUrl)
+            setSingleLine()
+        }
+        val apiKey = EditText(this).apply {
+            hint = getString(R.string.dialog_lightning_key)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        column.addView(url)
+        column.addView(apiKey)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_lightning_title)
+            .setMessage(R.string.dialog_lightning_hint)
+            .setView(column)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val base = url.text.toString().trim()
+                if (!base.startsWith("https://")) {
+                    toast(getString(R.string.toast_https_required))
+                    return@setPositiveButton
+                }
+                val typed = apiKey.text.toString()
+                val sealed = if (typed.isNotBlank()) {
+                    secretBox.seal(typed)
+                } else {
+                    superConfig.lightning.apiKeySealed
+                }
+                persistSuperConfig(
+                    superConfig.copy(
+                        lightning = LightningSettings(
+                            kind = LightningKind.LNBITS,
+                            baseUrl = base,
+                            apiKeySealed = sealed
+                        )
+                    )
+                )
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                persistSuperConfig(superConfig.copy(lightning = LightningSettings()))
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
     private fun updateCard(): View {
         val card = card(palette)
         card.addView(label(getString(R.string.ui_update), palette))
@@ -403,6 +709,7 @@ class GromActivity : Activity() {
     // -------------------------------------------------------------------- render
 
     private fun render() {
+        if (BuildConfig.GROMSERVER) renderSuper()
         val state = state()
         val runtimePresent = status?.get("runtime") == "node"
         val pid = number("pid")

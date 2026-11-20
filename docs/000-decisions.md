@@ -4,8 +4,9 @@ Status legend: **ACCEPTED** (normative), **REJECTED** (recorded so it is not
 re-proposed), **DEFERRED** (out of F1, tracked for later).
 
 Provenance: see `docs/RECOVERY.md`. This log is a re-derivation of the D1–D31
-record named in the handoff, extended with D32–D38 as the agent runtime, the operator
-surface, updates and release packaging were built out. The numbering is kept so cross-references survive.
+record named in the handoff, extended with D32–D48 as the agent runtime, the
+operator surface, updates, release packaging and the public data plane were
+built out. The numbering is kept so cross-references survive.
 
 ---
 
@@ -328,3 +329,175 @@ installable and updatable, but it does not establish publisher identity.
 
 *Enforced by:* `.github/workflows/release.yml`, `scripts/build-node-android.sh
 --verify`.
+
+## D39 — The public data plane is separate from the loopback control plane
+**ACCEPTED.** The server keeps two listeners with two independent policies. The
+control plane (`/grom/v1/*`) is unchanged: loopback only, bearer-token
+authenticated, and fatal to start when it cannot bind (D5). The data plane
+(`/v1/*`) is the super server: separately enabled, separately bound, separately
+authenticated, default port `47002`, and its refusal or failure is reported in
+status without stopping the control plane or the agent. The two planes share the
+process, the audit chain and the supervised agent, and nothing else. Data-plane
+code lives under `superserver/`; the control-plane HTTP code does not import it,
+and the only wiring is in `ServerRuntime` and the app's access card.
+
+*Why not extend the existing listener:* one listener means one bind policy and
+one credential, so enabling remote access would silently widen the control plane
+and its token. Two planes keep the default safe and make the risky mode a
+separate, explicit decision.
+
+*Enforced by:* `SuperServerIntegrationTest`, `tools/test-policy` (6, 22),
+`ServerRuntime`.
+
+## D40 — Super-server configuration is atomic, validated, and secret-free
+**ACCEPTED.** `<files>/grom/super-server.json` is written to a temporary file,
+hardened to owner-only permissions, then renamed over the previous file, so a
+crash never leaves half a policy. Loading is bounded at 64 KiB; an oversized,
+unreadable or non-object file falls back to the safe defaults with a reported
+`lastError`, never to a listener. The file holds a PBKDF2 hash and Ed25519
+public keys, so it contains no usable credential — except the backend key, which
+is sealed (D44). `SuperServerConfig.validate(controlPort)` runs before a socket
+exists and refuses with a stable code; the server never "starts anyway" on a
+configuration it could not honour.
+
+*Enforced by:* `SuperServerConfigStore`, `SuperServerConfig`,
+`SuperServerHost.startLocked`, `tools/test-policy` (18, 21).
+
+## D41 — A non-loopback bind requires a credential; PUBLIC requires an acknowledgement
+**ACCEPTED.** The data plane has three bind modes. `LOOPBACK` is `127.0.0.1` and
+the default. `LAN` resolves the current site-local IPv4 address, preferring a
+private address and never selecting loopback, wildcard or link-local; no usable
+address is `NO_LAN_ADDRESS`, not a fallback. `PUBLIC` is `0.0.0.0` and is
+refused unless `acknowledgePublicBind` is true. Any non-loopback mode is refused
+without a password hash or an enabled key (`CREDENTIAL_REQUIRED`). The hostname
+is never resolved and a bind failure is reported, never retried on another
+address.
+
+*Why the acknowledgement:* the wildcard means every interface, including any the
+operator did not think about. A boolean in the file that the app sets only when
+the operator cycles to *all interfaces* makes the decision deliberate and
+auditable.
+
+*Enforced by:* `SuperBindPolicy`, `SuperServerConfig.validate`,
+`SuperServerHost`, `tools/test-policy` (6, 18).
+
+## D42 — Password sessions and Ed25519 request signatures are the two credentials
+**ACCEPTED.** Both mechanisms are supported and the mode selects which are live:
+`PASSWORD`, `KEY`, or `BOTH` (the default). A password is verified against
+`pbkdf2-sha256$iterations$salt$hash` (PBKDF2-HMAC-SHA256, 16-byte salt, 150000
+iterations, 32-byte key) in constant time, then exchanged for a session token of
+32 random bytes, base64url, stored only as its SHA-256 digest, 12 h TTL and at
+most 16 live sessions. A signed request instead carries `X-Grom-Key`,
+`X-Grom-Timestamp`, `X-Grom-Nonce` and `X-Grom-Signature` over the exact
+six-line `grom-ed25519-v1` canonical string; timestamps are accepted within
+±300 s and a nonce is remembered only after the signature verifies, so replays
+are rejected without letting an unauthenticated caller fill the cache. Failures
+are uniform: the wire answer is one `401 UNAUTHORIZED`.
+
+*Why two:* a human-run client can type a password once and keep a short-lived
+session; a machine client can avoid putting any reusable secret on the wire,
+which matters when the traffic crosses a proxy the operator does not control.
+Neither mechanism is enough on its own for both consumers.
+
+*Enforced by:* `Ed25519Test`, `PasswordHashTest`, `RequestSignerTest`,
+`SessionStoreTest`, `RateLimiterTest`, `tools/test-policy` (19, 20).
+
+## D43 — Lightning is an adapter, never a custody layer
+**ACCEPTED.** Grom holds no wallet keys, signs no payments, computes no balance
+and matches no orders. The `lightning` plugin forwards an operator-configured
+backend's answer, in integer millisatoshis, and every failure is explicit: an
+unimplemented capability is `501 NOT_SUPPORTED` naming it, an unconfigured
+backend is `503 LIGHTNING_UNCONFIGURED`, an unreachable one is `503
+LIGHTNING_UNAVAILABLE`. A balance is either measured or absent; there is no
+default, no cached zero and no optimistic pending. This narrows S1-R002 for the
+data plane without repealing it: money vocabulary is confined to the adapter,
+and `tools/test-policy` fails if it appears elsewhere in server code.
+
+*Why an adapter:* custody is a different product with different liabilities.
+An operator who already runs a wallet should be able to reuse it; an operator
+who does not should not accidentally acquire one.
+
+*Enforced by:* `LightningBackend`, `LightningPluginTest`, `LnbitsBackendTest`,
+`tools/test-policy` (10).
+
+## D44 — The backend credential is sealed by the Android Keystore
+**ACCEPTED.** The LNbits API key is the only secret Grom stores that is valuable
+to an attacker off the device: it grants spend on a service Grom does not own.
+It is encrypted with AES-256-GCM
+under a non-exportable Android Keystore key (alias `grom-super-secrets`) and
+stored only as base64 of `version || ivLength || iv || ciphertext+tag`. The
+plaintext exists in memory while a backend object lives and in the `X-Api-Key`
+header; it never appears in the file, the status document, the audit log, a URL
+or an exception message. A keystore key that was rotated or deleted makes the
+sealed value unreadable, which is reported as an unconfigured backend, not a
+crash and not a plaintext fallback.
+
+*Why not the control token (D20):* the control token is checked by the same
+process that could read it anyway, so wrapping it buys little. A remote
+backend credential is different — it is useful to an attacker off the device.
+
+*Enforced by:* `SecretBox`, `AndroidKeystoreSecretBox`,
+`SuperServerHost.buildBackend`, `tools/test-policy` (21).
+
+## D45 — The agent is exposed as a plugin, not as a second raw port
+**ACCEPTED.** The supervised agent stays loopback-only and token-authenticated.
+The data plane reaches it through the `agent` plugin, which relays a whitelisted
+op to the control-plane `exec` path and returns the agent's own status and body
+unchanged. An unknown op is `400 UNKNOWN_OP`; an agent failure passes its status
+and code through; an unreachable agent is `502 AGENT_UNAVAILABLE`; a non-JSON
+reply is `502 AGENT_PROTOCOL_ERROR`. The plugin never synthesises `ok` and never
+widens the whitelist, which remains `ping`, `echo`, `status`, `kv.get`, `kv.put`.
+
+*Why:* a second raw port would need its own authentication, its own bounds and
+its own audit, and would expose the agent's protocol instead of a stable API.
+
+*Enforced by:* `AgentPlugin`, `ServerRuntime.exec`, `SuperServerIntegrationTest`.
+
+## D46 — Server events use SSE, not WebSocket
+**ACCEPTED.** `GET /v1/events` is a server-sent-events stream over the existing
+HTTP/1.1 parser and worker pool. It opens with `retry: 5000` and a `hello`
+event, emits `: ping` when no event was written for 15 s, ends with `bye`, and
+lives at most 30 minutes.
+Each subscriber owns a 32-frame bounded queue: a slow reader loses events, and
+that loss is counted, rather than blocking the publisher or growing the heap.
+
+*Why not WebSocket:* the traffic is one-way, and SSE needs no upgrade handshake,
+no framing library and no second authentication path. It also passes unchanged
+through the TLS terminators and tunnels an operator is told to use (D47).
+
+*Enforced by:* `EventBus`, `SuperRouter.eventStream`,
+`SuperServerIntegrationTest`.
+
+## D47 — TLS is terminated outside the process
+**ACCEPTED.** Grom contains no TLS server, no certificate storage and no
+certificate rotation. The data plane speaks plain HTTP on its bound address; an
+operator exposing it off loopback must put a TLS terminator (Caddy, nginx) or an
+encrypted tunnel (WireGuard, Tailscale, SSH) in front. The app warns when
+`PUBLIC` is selected, and `docs/SUPER-SERVER.md` states what is visible on the
+wire without one: password logins in clear text, request and response bodies in
+clear text, and Ed25519 signatures that reveal no key and cannot be replayed.
+
+*Why:* certificate lifecycle, renewal and hostname validation are a product of
+their own, and doing them badly is worse than delegating them. It also keeps D3
+true — no TLS library is added to the APK.
+
+*Enforced by:* `SuperServerConfig` (no TLS fields), the access-card warning in
+`GromActivity`, `docs/SUPER-SERVER.md`, `tools/test-policy` (16).
+
+## D48 — Outbound connections only to an operator-configured plugin backend
+**ACCEPTED.** Grom initiates no connection of its own except the update check
+(D37). A Lightning backend is the second exception, and it is narrow: the URL is
+supplied by the operator at runtime, never compiled in; it must start with
+`https://` (`INSECURE_BACKEND_URL`); redirects are not followed; the transport
+refuses every scheme except `http` and `https`, and the configuration accepts
+only `https`; responses are capped at 64 KiB; timeouts are bounded;
+and the API key travels only in the `X-Api-Key` header. `tools/test-policy`
+permits exactly one absolute URL in server code — the update feed — and fails on
+any other. This narrows S1-R003 and S1-R028 for the data plane.
+
+*Why:* the alternative is either no Lightning integration or a compiled-in
+endpoint, and a compiled endpoint cannot be audited by the operator who is
+supposed to control where their money traffic goes.
+
+*Enforced by:* `HttpJsonClient`, `LnbitsBackend`,
+`SuperServerConfig.validate`, `tools/test-policy` (17).

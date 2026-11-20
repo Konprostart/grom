@@ -70,11 +70,13 @@ void     restartAgent();
 void     resetAgent();
 ```
 Callers on a foreign signature never reach these; callers on the same
-signature get all of them in F1.
+signature get all of them in F1. The interface also declares
+`void rotateToken()` (the IPC counterpart of S2-R020). API 2 adds
+`void reloadSuperServer()`; section 8 states the additive contract.
 
 ### S4-R012
 `apiVersion()` returns `1` for F1. Clients MUST check it before assuming a
-method exists.
+method exists. API 2 returns `2` (S4-R028).
 
 ### S4-R013
 `auditTail(int)` clamps `maxEntries` to 1…200, matching S2-R018.
@@ -141,3 +143,38 @@ transport.
 
 ### S4-R027
 No AIDL method may accept a file descriptor or a custom Parcelable in F1.
+
+## 8. API 2 — the public data plane
+
+### S4-R028
+`apiVersion()` returns `2`. API 2 is additive: every API 1 method is unchanged.
+The interface also declares `rotateToken()` (the IPC counterpart of S2-R020) and
+the one new transaction:
+
+```aidl
+void reloadSuperServer();
+```
+
+### S4-R029
+`reloadSuperServer()` re-reads `<files>/grom/super-server.json` and rebuilds
+only the public data plane described in S5. The control plane, the bearer token
+and the supervised agent are untouched, so an operator can change exposure
+without dropping the supervisor. It is the only way the app applies an access
+change (D39).
+
+### S4-R030
+The call passes the same signature gate as every other transaction
+(S4-R007/S4-R008). It never throws a checked exception (S4-R016): when the server
+is not running it fails as `GROM_E_SERVER_STOPPED`, and in the peripheral role as
+`GROM_E_PERIPHERAL_ROLE`. A refused data-plane configuration is not a Binder
+failure; it is reported through `statusJson()` under `super.error` (S5-R003).
+
+### S4-R031
+`GromClient.API_VERSION` is `2`. Clients MUST compare the value returned by
+`apiVersion()` before calling `reloadSuperServer()` (S4-R012).
+
+### S4-R032
+A reload invalidates every password session of the data plane, because the
+session store is rebuilt with the listener (S5-R014). Clients that held a session
+token MUST sign in again; Ed25519 keys registered in the new configuration keep
+working.

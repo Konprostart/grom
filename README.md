@@ -3,10 +3,11 @@
 **A universal, lightweight Android server — the phone as an agent, never as an
 authority for money.**
 
-Grom exposes a small, authenticated, loopback-only HTTP API and a
+Grom exposes a small, authenticated, loopback-only control API and a
 signature-protected Binder surface on an Android device. It supervises a Node
 agent, records every state change in a hash-chained audit log, and refuses to
-believe anything about itself that is not true.
+believe anything about itself that is not true. A second, separately configured
+public data plane is available but off by default.
 
 [![CI](https://github.com/sveatoken/grom/actions/workflows/ci.yml/badge.svg)](https://github.com/sveatoken/grom/actions/workflows/ci.yml)
 
@@ -20,7 +21,7 @@ grom/
 ├── agent/                  grom-agent.js, the supervised Node agent
 ├── sdk/                    app.grom.sdk + AIDL app.grom.sdk.ipc
 ├── testapps/               samecert / foreigncert — the C-008 evidence
-├── docs/                   000-decisions, specs S1–S4, F1 plan, RELEASING
+├── docs/                   000-decisions, specs S1–S5, F1 plan, guides, RELEASING
 ├── tools/                  policy, third-party, IPC-signing and agent gates
 ├── scripts/                test keys and the arm64 Node runtime pipeline
 ├── third_party/            the dependency ledger
@@ -101,11 +102,11 @@ gradle :app:assembleServer29Release :app:assemblePeripheral26Release
 ## Conformance
 
 ```bash
-tools/run-gates                           # all of the below, in order
+tools/run-gates                           # all 8 gates, in order
 gradle :app:testServer29DebugUnitTest     # JVM policy/logic tests
 gradle :app:lint                          # lint, 0 errors required
 tools/check-third-party                   # dependency ledger matches the build
-tools/test-policy                         # 17 static invariants
+tools/test-policy                         # 22 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
 tools/test-agent-runtime                  # grom-agent.js protocol + degradation
 tools/verify-ipc-signing                  # C-008, needs the three APKs
@@ -135,6 +136,46 @@ curl -s http://127.0.0.1:47001/grom/v1/health
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/status
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/audit/verify
 ```
+
+## Super server (public API)
+
+The control plane above is loopback-only and cannot be moved. Grom also has a
+separate **data plane**, the super server, on `/v1/*` (default port `47002`).
+It is **off by default and loopback-only** until an operator changes it.
+
+Enable it in the app's **Public API** card: *Enable*, *Bind* (loopback / LAN /
+all interfaces), *Auth* (password / key / both), *Password*, *API keys*
+(Ed25519) and *Lightning*. Enabling needs a password or a key; a non-loopback
+bind is refused without a credential, and *all interfaces* binds `0.0.0.0` only
+after an explicit acknowledgement. Changes are applied by the running server
+through `reloadSuperServer()` (IPC API 2); every reload invalidates existing
+sessions.
+
+| endpoint | purpose |
+|---|---|
+| `GET /v1/health` | unauthenticated liveness, no secrets |
+| `POST /v1/auth/login` | exchange a password for a session token |
+| `POST /v1/auth/logout` | revoke the session token |
+| `GET /v1/status` | address, limits, plugin inventory, agent state |
+| `GET /v1/plugins` | registered plugins and their capabilities |
+| `GET /v1/plugins/{id}` | one plugin |
+| `POST /v1/plugins/{id}/rpc` | `{"op":"...","args":{...}}` |
+| `GET /v1/events` | server-sent events |
+
+Auth is `PASSWORD`, `KEY` or `BOTH`. Passwords are stored as PBKDF2-SHA256
+hashes and exchanged for 12 h session tokens; signed requests use Ed25519 over a
+six-line canonical string with a timestamp and a nonce. The only plugins are the
+supervised `agent` and the `lightning` adapter: Lightning is an operator-run
+LNbits backend reached over https, with its API key sealed by the Android
+Keystore. Grom custodies nothing and never fabricates a balance or an invoice.
+
+Grom speaks plain HTTP in-process; put a TLS terminator or an encrypted tunnel
+in front before exposing the port. The data plane has JVM tests only — nothing
+has been run on a device for this feature.
+
+Spec: [`docs/specs/S5-super-server.md`](docs/specs/S5-super-server.md). Operator
+guide: [`docs/SUPER-SERVER.md`](docs/SUPER-SERVER.md). Lightning:
+[`docs/LIGHTNING.md`](docs/LIGHTNING.md).
 
 ## The agent runtime
 
@@ -174,9 +215,12 @@ the app has to answer at a glance.
 
 ## Security model, in one paragraph
 
-There is no network exposure: the listener binds loopback and fails closed on
-anything else. Every endpoint except health requires a 256-bit bearer token
-compared in constant time. The Binder surface is gated by a `signature`
+The control plane binds loopback and fails closed on anything else. Every
+control-plane endpoint except health requires a 256-bit bearer token compared in
+constant time. The optional data plane is off by default, can be bound to the
+LAN or to every interface only with a credential, and requires an explicit
+acknowledgement for the wildcard; it has no TLS in-process, so it is meant to sit
+behind a terminator or tunnel. The Binder surface is gated by a `signature`
 permission *and* a runtime signature comparison, so only apps signed with the
 same certificate get a Binder at all. Secrets reach the agent over stdin, never
 argv or environment. Every state change is appended to a SHA-256 hash chain that
@@ -184,7 +228,7 @@ can be replayed to detect tampering. Three agent crashes in ten minutes
 quarantine it, and only a human can clear that.
 
 Full rationale: `docs/000-decisions.md`. Normative contracts:
-`docs/specs/S1`–`S4`.
+`docs/specs/S1`–`S5`.
 
 ## History
 

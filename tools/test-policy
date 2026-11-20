@@ -3,9 +3,9 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21 and S1-R002…S1-R012.
+# See D1, D2, D5, D15, D18, D21, D39…D47 and S1-R002…S1-R012, S5-R001…S5-R026.
 #
-# The gate is intentionally a fixed count: "17/17" is the number of passes.
+# The gate is intentionally a fixed count: "22/22" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -45,13 +45,13 @@ check "service gated by permission" \
 check "foregroundServiceType specialUse" \
   grep -q 'foregroundServiceType="specialUse"' "$MANIFEST_SERVER"
 
-# 5. the bind policy allows exactly the loopback literals
-check "bind policy allow-list" \
+# 5. the control-plane bind policy allows exactly the loopback literals
+check "control bind allow-list" \
   grep -q 'setOf("127.0.0.1", "::1")' "$MAIN/core/BindPolicy.kt"
 
-# 6. no wildcard bind literal outside the policy
-check "no wildcard bind outside BindPolicy" \
-  bash -c "! grep -rn '\"0\.0\.0\.0\"' $MAIN --include='*.kt' | grep -v 'core/BindPolicy.kt'"
+# 6. no wildcard bind literal outside the two bind-policy files (D39)
+check "no wildcard bind outside a bind policy" \
+  bash -c "! grep -rn '\"0\.0\.0\.0\"' $MAIN --include='*.kt' | grep -vE 'core/(Super)?BindPolicy\.kt'"
 
 # 7. no hostname resolution on the bind path
 check "no InetAddress.getByName in main sources" \
@@ -65,9 +65,11 @@ check "constant-time token compare" \
 check "audit chain uses SHA-256" \
   bash -c "grep -q 'SHA-256' $MAIN/core/AuditChain.kt && grep -q 'SHA-256' $MAIN/core/Token.kt"
 
-# 10. no money vocabulary in server code (D1, S1-R002)
-check "no money/ledger vocabulary" \
-  bash -c "! grep -rniE 'payment|ledger|settlement|\bbalance\b|invoice' $MAIN --include='*.kt'"
+# 10. money vocabulary is confined to the Lightning adapter (D43, S1-R002 amended)
+#     Grom still has no ledger and custodies nothing: the adapter only forwards
+#     to an external backend, and the rest of the server never speaks money.
+check "money vocabulary only inside the Lightning adapter" \
+  bash -c "! grep -rniE 'payment|ledger|settlement|\bbalance\b|invoice' $MAIN --include='*.kt' | grep -v 'superserver/plugins/lightning/'"
 
 # 11. every Kotlin source carries an SPDX header
 # Depend on grep's *output*, not on find's exit status: GNU findutils
@@ -89,18 +91,41 @@ check "boot restart is opt-in" \
 check "boot respects quarantine" \
   grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
 
-# 15. every IPC transaction checks signatures (6 reads + 3 mutations + the helper)
+# 15. every IPC transaction checks signatures (7 reads/mutations + the helper + reload)
 check "every IPC transaction applies the signature gate" \
-  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 7 ]"
+  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 8 ]"
 
 # 16. cleartext outbound traffic is not enabled
 check "no usesCleartextTraffic" \
   bash -c "! grep -rq 'usesCleartextTraffic' app/src"
 
-# 17. the only outbound URL in server code is the operator-initiated update feed
-#     (D37, S1-R003/S1-R033). Everything else stays offline.
-check "no outbound URLs except the update feed" \
-  bash -c "! grep -rnE 'https?://' $MAIN --include='*.kt' --exclude='UpdateChecker.kt' && grep -q 'https://api.github.com/repos/' $MAIN/update/UpdateChecker.kt"
+# 17. the only hardcoded outbound URL in server code is the operator-initiated
+#     update feed (D37, S1-R003/S1-R033). A Lightning backend URL is supplied by
+#     the operator at runtime, never compiled in (D48).
+#     The pattern requires a host character after the scheme: a literal like
+#     startsWith("https://") is a security check, not an endpoint.
+check "no hardcoded outbound URLs except the update feed" \
+  bash -c "! grep -rnE 'https?://[A-Za-z0-9]' $MAIN --include='*.kt' --exclude='UpdateChecker.kt' && grep -q 'https://api.github.com/repos/' $MAIN/update/UpdateChecker.kt"
+
+# 18. binding every interface requires an explicit acknowledgement (D41)
+check "public bind requires acknowledgement" \
+  bash -c "grep -q 'PUBLIC_NOT_ACKNOWLEDGED' $MAIN/superserver/SuperServerConfig.kt"
+
+# 19. password handling is PBKDF2-SHA256 with a constant-time comparison (D42)
+check "password uses PBKDF2-SHA256 and constant-time compare" \
+  bash -c "grep -q 'PBKDF2WithHmacSHA256' $MAIN/superserver/auth/PasswordHash.kt && grep -q 'MessageDigest.isEqual' $MAIN/superserver/auth/PasswordHash.kt"
+
+# 20. signed requests reject replays by nonce (D42, D45)
+check "Ed25519 requests have replay protection" \
+  grep -q 'SIGNATURE_REPLAYED' "$MAIN/superserver/auth/RequestSigner.kt"
+
+# 21. a backend URL must be https, so the backend credential cannot leak (D44)
+check "backend URL must be https" \
+  bash -c "grep -q 'INSECURE_BACKEND_URL' $MAIN/superserver/SuperServerConfig.kt && grep -q 'startsWith(\"https://\")' $MAIN/superserver/SuperServerConfig.kt"
+
+# 22. the super server is built from code, never loaded dynamically (D39)
+check "no dynamic plugin loading" \
+  bash -c "! grep -rnE 'Class\.forName|DexClassLoader|PathClassLoader|ScriptEngine' $MAIN/superserver --include='*.kt'"
 
 echo
 TOTAL=$((PASS + FAIL))

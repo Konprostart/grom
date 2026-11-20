@@ -8,7 +8,7 @@
     <!-- Operator surface (D36). Keeping every visible string here makes a
          localization pass mechanical and keeps lint's SetTextI18n clean. -->
     <string name="ui_wordmark">GROM</string>
-    <string name="ui_subtitle">LOCAL SERVER \u00b7 LOOPBACK ONLY</string>
+    <string name="ui_subtitle">LOCAL SERVER \u00b7 ANDROID</string>
     <string name="ui_footer">Grom %1$s \u00b7 Apache-2.0</string>
     <string name="ui_status">Status</string>
     <string name="ui_node_runtime">Node runtime</string>
@@ -82,4 +82,55 @@
     <string name="toast_token_rotated">Token rotated</string>
     <string name="toast_no_browser">No browser available</string>
     <string name="toast_no_download_link">No download link in this release</string>
+
+    <!-- Public access / super server (D39…D47). -->
+    <string name="ui_access">Access</string>
+    <string name="access_title">Public API</string>
+    <string name="access_off">Off</string>
+    <string name="access_listening">Listening on %1$s</string>
+    <string name="access_bind">Bind</string>
+    <string name="access_auth">Auth</string>
+    <string name="access_password">Password</string>
+    <string name="access_keys">API keys</string>
+    <string name="access_lightning">Lightning</string>
+    <string name="access_enable">Enable</string>
+    <string name="access_bind_loopback">loopback</string>
+    <string name="access_bind_lan">LAN</string>
+    <string name="access_bind_public">all interfaces</string>
+    <string name="access_auth_password">password</string>
+    <string name="access_auth_key">key</string>
+    <string name="access_auth_both">both</string>
+    <string name="access_password_set">set</string>
+    <string name="access_password_unset">not set</string>
+    <string name="access_keys_none">none</string>
+    <string name="access_lightning_none">none</string>
+    <string name="access_credentials_required">Set a password or add a key first</string>
+    <string name="access_public_warning">All interfaces: put a TLS terminator in front of this port</string>
+    <string name="access_saved">Access configuration saved</string>
+    <string name="access_reload_failed">Reload failed; is the server running?</string>
+    <string name="super_on">On</string>
+    <string name="super_off">Off</string>
+
+    <string name="dialog_password_title">Set password</string>
+    <string name="dialog_password_hint">At least 8 characters</string>
+    <string name="dialog_password_too_short">Password must be at least 8 characters</string>
+    <string name="dialog_save">Save</string>
+    <string name="dialog_clear">Clear</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_close">Close</string>
+
+    <string name="dialog_key_title">Ed25519 API keys</string>
+    <string name="dialog_key_generate">Generate new key</string>
+    <string name="dialog_key_remove">Remove all keys</string>
+    <string name="dialog_key_none">No keys. Generating shows the private seed exactly once.</string>
+    <string name="dialog_key_seed_title">Private seed (copy now)</string>
+    <string name="dialog_key_seed_body">Seed (base64url):\n\n%1$s\n\nKey id: %2$s\n\nStore it in your client. It cannot be shown again.</string>
+    <string name="dialog_key_copy">Copy seed</string>
+    <string name="toast_key_copied">Seed copied</string>
+
+    <string name="dialog_lightning_title">Lightning backend</string>
+    <string name="dialog_lightning_url">HTTPS base URL</string>
+    <string name="dialog_lightning_key">API key (leave blank to keep)</string>
+    <string name="dialog_lightning_hint">LNbits over https only. Grom never holds wallet keys.</string>
+    <string name="toast_https_required">Backend URL must start with https://</string>
 </resources>

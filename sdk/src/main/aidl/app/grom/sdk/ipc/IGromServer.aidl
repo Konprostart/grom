@@ -31,4 +31,10 @@ interface IGromServer {
 
     /** Issues a new bearer token and returns it to the caller once. */
     void rotateToken();
+
+    /**
+     * Re-reads the persisted public-access configuration and rebuilds only that
+     * listener. Added in API 2 (D39); the control plane and agent are untouched.
+     */
+    void reloadSuperServer();
 }

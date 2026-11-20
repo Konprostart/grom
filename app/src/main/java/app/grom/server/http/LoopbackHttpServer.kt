@@ -122,7 +122,11 @@ class LoopbackHttpServer(
             return buffer.toByteArray() // 0, invalid or oversized: let the parser decide
         }
 
-        var remaining = declared
+        // Some of the body may already be in `buffer`: the first read can return
+        // headers and body in one TCP segment. Counting that bytes twice made the
+        // reader wait for bytes the client had already sent (a hang on POST).
+        val alreadyBuffered = buffer.size() - (headerEnd + CRLFCRLF.size)
+        var remaining = declared - alreadyBuffered.coerceIn(0, declared)
         while (remaining > 0) {
             val read = input.read(chunk, 0, minOf(chunk.size, remaining))
             if (read < 0) break
