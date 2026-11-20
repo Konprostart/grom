@@ -276,13 +276,54 @@ class SuperServerIntegrationTest {
         assertEquals(200, second.status)
     }
 
+    @Test
+    fun statusCarriesTheReferenceBlockButHealthDoesNot() {
+        val harness = start(
+            serverStatus = {
+                mapOf(
+                    "npub" to "npub1example",
+                    "relays" to listOf("wss://relay.example"),
+                    "remoteBridge" to mapOf("label" to "VPS", "description" to "tunnel"),
+                    "lightningHealth" to mapOf(
+                        "configured" to false,
+                        "backend" to null,
+                        "reachable" to null,
+                        "error" to null
+                    )
+                )
+            }
+        )
+        val token = harness.login()
+
+        val status = harness.request(
+            "GET", "/v1/status",
+            mapOf("Authorization" to "Bearer $token")
+        )
+        assertEquals(200, status.status)
+        val document = status.json()
+        assertEquals("npub1example", document["npub"])
+        assertEquals(listOf("wss://relay.example"), document["relays"])
+        assertTrue(document.containsKey("remoteBridge"))
+        assertTrue(document.containsKey("lightningHealth"))
+
+        // The unauthenticated health endpoint exposes none of this (D39).
+        val health = harness.request("GET", "/v1/health")
+        assertEquals(200, health.status)
+        assertFalse(health.json().containsKey("npub"))
+        assertFalse(health.json().containsKey("relays"))
+        assertFalse(health.json().containsKey("remoteBridge"))
+        assertFalse(health.json().containsKey("lightningHealth"))
+        assertFalse(health.body.contains("npub1example"))
+    }
+
     // --------------------------------------------------------------- harness
 
     private fun start(
         keyAuth: Boolean = false,
         keys: Map<String, ByteArray> = emptyMap(),
         loginLimiter: LoginLimiter = LoginLimiter(),
-        maxBodyBytes: Int = 8_192
+        maxBodyBytes: Int = 8_192,
+        serverStatus: () -> Map<String, Any?> = { mapOf("address" to "127.0.0.1:0") }
     ): Harness {
         val password = "correct-horse-battery"
         val hash = PasswordHash.create(password, iterations = 10_000)
@@ -322,7 +363,7 @@ class SuperServerIntegrationTest {
                 plugins = registry,
                 events = EventBus(),
                 uptimeMs = { 42L },
-                serverStatus = { mapOf("address" to "127.0.0.1:0") }
+                serverStatus = serverStatus
             )
         )
         created.start()

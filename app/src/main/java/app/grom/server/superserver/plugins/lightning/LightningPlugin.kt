@@ -15,8 +15,20 @@ import app.grom.server.superserver.PluginResult
 class LightningPlugin(
     private val backend: LightningBackend?,
     private val configuredKind: String = "none",
-    private val configurationError: String? = null
+    private val configurationError: String? = null,
+    private val clock: () -> Long = { System.currentTimeMillis() }
 ) : Plugin {
+
+    /**
+     * The last *measured* health result, or null when the adapter has never been
+     * probed. `status` reports it verbatim: a configured backend is not a
+     * reachable backend, and Grom does not claim otherwise (D52).
+     */
+    @Volatile
+    private var lastHealth: Map<String, Any?>? = null
+
+    @Volatile
+    private var lastProbeAtMs: Long = 0L
 
     override val id: String = "lightning"
 
@@ -32,7 +44,11 @@ class LightningPlugin(
         "configured" to (backend != null),
         "backend" to (backend?.name ?: configuredKind),
         "capabilities" to capabilities().sorted(),
-        "error" to configurationError
+        "error" to configurationError,
+        // null until the `health` op has actually run.
+        "reachable" to (lastHealth?.get("reachable") as? Boolean),
+        "probedAtMs" to lastProbeAtMs.takeIf { it > 0L },
+        "detail" to (lastHealth?.get("detail") as? String)
     )
 
     override fun rpc(op: String, args: Map<String, Any?>): PluginResult {
@@ -56,13 +72,14 @@ class LightningPlugin(
             when (op) {
                 "health" -> {
                     val health = active.health()
-                    PluginResult.Ok(
-                        mapOf(
-                            "backend" to active.name,
-                            "reachable" to health.reachable,
-                            "detail" to health.detail
-                        )
+                    val measured = mapOf(
+                        "backend" to active.name,
+                        "reachable" to health.reachable,
+                        "detail" to health.detail
                     )
+                    lastHealth = measured
+                    lastProbeAtMs = clock()
+                    PluginResult.Ok(measured)
                 }
 
                 "status" -> PluginResult.Ok(status())

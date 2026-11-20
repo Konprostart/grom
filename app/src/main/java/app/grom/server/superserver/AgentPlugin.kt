@@ -16,7 +16,13 @@ import app.grom.server.http.JsonParser
  */
 class AgentPlugin(
     private val health: () -> Map<String, Any?>,
-    private val exec: (String, String?) -> HttpResponse
+    private val exec: (String, String?) -> HttpResponse,
+    /**
+     * Extra read-only status fields owned by the host (the reference config,
+     * D52/D53). It is a lazy callback so a reference-only reload is visible
+     * without rebuilding the plugin registry (D54).
+     */
+    private val statusExtra: () -> Map<String, Any?> = { emptyMap() }
 ) : Plugin {
 
     override val id: String = "agent"
@@ -26,11 +32,15 @@ class AgentPlugin(
 
     override fun capabilities(): Set<String> = AgentChannel.OPS + "status" + "health"
 
-    override fun status(): Map<String, Any?> = health()
+    /** `status` is the agent health plus the host's reference block; `health` stays pure. */
+    override fun status(): Map<String, Any?> = health() + statusExtra()
 
     override fun rpc(op: String, args: Map<String, Any?>): PluginResult {
-        if (op == "health" || op == "status") {
+        if (op == "health") {
             return PluginResult.Ok(health())
+        }
+        if (op == "status") {
+            return PluginResult.Ok(status())
         }
         if (op !in AgentChannel.OPS) {
             return PluginResult.Failure(400, "UNKNOWN_OP", "unknown op")

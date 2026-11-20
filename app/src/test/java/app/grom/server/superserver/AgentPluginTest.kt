@@ -12,10 +12,15 @@ class AgentPluginTest {
 
     private val health = mapOf("state" to "READY", "api" to 1, "pid" to 42L)
 
+    private fun plugin(
+        statusExtra: () -> Map<String, Any?> = { emptyMap() },
+        exec: (String, String?) -> HttpResponse
+    ): AgentPlugin = AgentPlugin({ health }, exec, statusExtra)
+
     @Test
     fun statusAndHealthAreReadOnlySnapshots() {
         var called = false
-        val plugin = AgentPlugin({ health }) { _, _ ->
+        val plugin = plugin { _, _ ->
             called = true
             HttpResponse(500, "{}")
         }
@@ -30,7 +35,7 @@ class AgentPluginTest {
     fun relaysTheOpAndReturnsTheAgentEnvelope() {
         var seenOp: String? = null
         var seenBody: String? = null
-        val plugin = AgentPlugin({ health }) { op, body ->
+        val plugin = plugin { op, body ->
             seenOp = op
             seenBody = body
             HttpResponse(200, """{"op":"ping","ok":true,"result":"pong"}""")
@@ -47,7 +52,7 @@ class AgentPluginTest {
 
     @Test
     fun agentErrorsKeepTheirStatusAndCode() {
-        val plugin = AgentPlugin({ health }) { _, _ ->
+        val plugin = plugin { _, _ ->
             HttpResponse(503, """{"ok":false,"code":"STORAGE_UNAVAILABLE","message":"no sqlite"}""")
         }
         val result = plugin.rpc("kv.get", mapOf("key" to "a"))
@@ -60,7 +65,7 @@ class AgentPluginTest {
 
     @Test
     fun serverExceptionsBecomeStructuredFailures() {
-        val plugin = AgentPlugin({ health }) { _, _ ->
+        val plugin = plugin { _, _ ->
             throw ApiException(409, "QUARANTINED", "agent is quarantined")
         }
         val result = plugin.rpc("ping", emptyMap())
@@ -71,7 +76,7 @@ class AgentPluginTest {
 
     @Test
     fun nonJsonSuccessIsAProtocolError() {
-        val plugin = AgentPlugin({ health }) { _, _ -> HttpResponse(200, "not json") }
+        val plugin = plugin { _, _ -> HttpResponse(200, "not json") }
         val result = plugin.rpc("ping", emptyMap())
         assertTrue(result is PluginResult.Failure)
         assertEquals(502, (result as PluginResult.Failure).status)
@@ -81,7 +86,7 @@ class AgentPluginTest {
     @Test
     fun unknownOpsNeverReachTheAgent() {
         var called = false
-        val plugin = AgentPlugin({ health }) { _, _ ->
+        val plugin = plugin { _, _ ->
             called = true
             HttpResponse(200, "{}")
         }
@@ -89,5 +94,28 @@ class AgentPluginTest {
         assertTrue(result is PluginResult.Failure)
         assertEquals(400, (result as PluginResult.Failure).status)
         assertFalse(called)
+    }
+
+    @Test
+    fun statusAddsHostReferenceDataButHealthStaysPure() {
+        val extra = mapOf<String, Any?>("npub" to "npub1example", "relays" to listOf<String>())
+        val plugin = AgentPlugin(
+            health = { health },
+            exec = { _, _ -> HttpResponse(500, "{}") },
+            statusExtra = { extra }
+        )
+
+        assertEquals(health + extra, plugin.status())
+        val status = plugin.rpc("status", emptyMap()) as PluginResult.Ok
+        assertEquals(health + extra, status.payload)
+        // `health` deliberately stays the agent's own answer: no device config.
+        val healthOnly = plugin.rpc("health", emptyMap()) as PluginResult.Ok
+        assertEquals(health, healthOnly.payload)
+    }
+
+    @Test
+    fun defaultStatusExtraKeepsTheOriginalContract() {
+        val plugin = plugin { _, _ -> HttpResponse(500, "{}") }
+        assertEquals(health, plugin.status())
     }
 }

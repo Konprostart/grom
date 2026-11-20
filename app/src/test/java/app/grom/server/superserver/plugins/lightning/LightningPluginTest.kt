@@ -298,7 +298,18 @@ class LightningPluginTest {
     fun `status exposes no secret fields`() {
         val status = LightningPlugin(FakeBackend(), "lnbits", null).status()
 
-        assertEquals(setOf("configured", "backend", "capabilities", "error"), status.keys)
+        assertEquals(
+            setOf(
+                "configured",
+                "backend",
+                "capabilities",
+                "error",
+                "reachable",
+                "probedAtMs",
+                "detail"
+            ),
+            status.keys
+        )
         assertEquals(true, status["configured"])
         assertEquals("fake", status["backend"])
         assertEquals(
@@ -313,8 +324,45 @@ class LightningPluginTest {
             status["capabilities"]
         )
         assertNull(status["error"])
+        assertNull(status["reachable"])
+        assertNull(status["probedAtMs"])
+        assertNull(status["detail"])
         assertFalse(status.containsKey("apiKey"))
         assertFalse(status.containsKey("token"))
         assertFalse(status.containsKey("secret"))
+    }
+
+    @Test
+    fun `status reports a measured health result and nothing before it`() {
+        val backend = FakeBackend()
+        var now = 1_000L
+        val plugin = LightningPlugin(backend, "fake", null) { now }
+
+        // Before any probe, reachable is unknown, not false and not true.
+        assertNull(plugin.status()["reachable"])
+        assertNull(plugin.status()["probedAtMs"])
+
+        val ok = plugin.rpc("health", emptyMap()) as PluginResult.Ok
+        assertEquals(true, ok.payload["reachable"])
+
+        // The timestamp is the time of the probe, not the time of the status read.
+        val status = plugin.status()
+        assertEquals(true, status["reachable"])
+        assertEquals(1_000L, status["probedAtMs"])
+
+        now = 5_000L
+        plugin.rpc("health", emptyMap())
+        assertEquals(5_000L, plugin.status()["probedAtMs"])
+    }
+
+    @Test
+    fun `status never calls the backend`() {
+        val backend = FakeBackend()
+        backend.failure = RuntimeException("backend must not be touched")
+        val plugin = LightningPlugin(backend, "fake", null)
+
+        // If status probed the backend, this would throw.
+        assertEquals(true, plugin.status()["configured"])
+        assertNull(plugin.status()["reachable"])
     }
 }

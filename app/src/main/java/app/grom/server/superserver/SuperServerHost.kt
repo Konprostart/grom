@@ -86,6 +86,21 @@ class SuperServerHost(
 
     fun reload() {
         synchronized(lock) {
+            val loaded = configStore.load()
+            // Changing only npub/relays/remoteBridge cannot invalidate a session
+            // or a listener, so it is applied in place (D54). Everything else
+            // rebuilds the whole plane, as before.
+            if (server != null && config.sameRuntimePolicy(loaded)) {
+                config = loaded
+                lastError = configStore.lastError
+                audit(
+                    "super.reload.reference",
+                    "npub=${loaded.npub != null} relays=${loaded.relays.size} " +
+                        "bridge=${loaded.remoteBridge != null}"
+                )
+                logger("super server reference configuration updated without rebinding")
+                return
+            }
             audit("super.reload", "")
             stopLocked()
             startLocked()
@@ -99,6 +114,7 @@ class SuperServerHost(
     /** Snapshot for `GET /v1/status`, `/grom/v1/status` and the UI. */
     fun status(): Map<String, Any?> {
         val current = server
+        val lightningStatus = registry.find("lightning")?.status() ?: emptyMap()
         return mapOf(
             "enabled" to config.enabled,
             "running" to (current?.isRunning() == true),
@@ -118,7 +134,7 @@ class SuperServerHost(
                 mapOf("id" to it.id, "capabilities" to it.capabilities().sorted())
             },
             "referral" to ReferralStore.summary(appContext)
-        )
+        ) + SuperStatusDocument.build(config, lightningStatus)
     }
 
     // ------------------------------------------------------------- lifecycle
@@ -168,7 +184,14 @@ class SuperServerHost(
         val backend = buildBackend(loaded)
         val pluginRegistry = PluginRegistry(
             listOf(
-                AgentPlugin(agentHealth, agentExec),
+                AgentPlugin(agentHealth, agentExec) {
+                    // Read at call time so a reference-only reload needs no
+                    // registry rebuild (D54).
+                    SuperStatusDocument.build(
+                        config,
+                        registry.find("lightning")?.status() ?: emptyMap()
+                    )
+                },
                 LightningPlugin(backend, loaded.lightning.kind.wireName, backendError)
             )
         )

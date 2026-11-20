@@ -165,4 +165,44 @@
     <string name="dialog_lightning_key">API key (leave blank to keep)</string>
     <string name="dialog_lightning_hint">LNbits over https only. Grom never holds wallet keys.</string>
     <string name="toast_https_required">Backend URL must start with https://</string>
+
+    <!-- Reference configuration for an external VPS bridge (D52–D54). Grom
+         stores this; it never dials a relay and never starts a tunnel. -->
+    <string name="access_npub">Nostr npub</string>
+    <string name="access_npub_none">not set</string>
+    <string name="access_relays">Nostr relays</string>
+    <string name="access_relays_none">none</string>
+    <plurals name="access_relays_count">
+        <item quantity="one">%1$d configured</item>
+        <item quantity="other">%1$d configured</item>
+    </plurals>
+    <string name="access_bridge">Remote bridge</string>
+    <string name="access_bridge_none">not set</string>
+    <string name="access_copy_config">Copy config</string>
+
+    <string name="dialog_npub_title">Nostr public key</string>
+    <string name="dialog_npub_hint">Public key (NIP-19) or 64-character hex</string>
+    <string name="dialog_npub_body">A public key only. Grom never signs and never connects to a relay; an external bridge reads this value from status.</string>
+    <string name="toast_npub_invalid">That is not a valid NIP-19 npub</string>
+
+    <string name="dialog_relay_title">Nostr relays</string>
+    <string name="dialog_relay_body">Stored as a reference only. Grom opens no relay connection; these URLs are for an external bridge.</string>
+    <string name="dialog_relay_hint">wss://relay.example</string>
+    <string name="dialog_relay_add">Add</string>
+    <string name="dialog_relay_copy">Copy</string>
+    <string name="dialog_relay_remove">Remove</string>
+    <string name="toast_relay_invalid">Relay must be a ws:// or wss:// URL</string>
+    <string name="toast_relay_duplicate">That relay is already in the list</string>
+    <plurals name="toast_relay_limit">
+        <item quantity="one">At most %1$d relay</item>
+        <item quantity="other">At most %1$d relays</item>
+    </plurals>
+    <string name="toast_relay_copied">Relay URL copied</string>
+
+    <string name="dialog_bridge_title">Remote bridge</string>
+    <string name="dialog_bridge_body">A label for a tunnel you run elsewhere (SSH, WireGuard, Tailscale). Grom does not start it and stores no credentials here.</string>
+    <string name="dialog_bridge_label">Label (for example: Mostro VPS)</string>
+    <string name="dialog_bridge_description">Description (optional)</string>
+    <string name="toast_bridge_invalid">That hint is too long or looks like a secret</string>
+    <string name="toast_config_copied">Config copied \u2014 no secrets included</string>
 </resources>

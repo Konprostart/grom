@@ -29,12 +29,16 @@ import app.grom.server.referral.ReferralStore
 import app.grom.server.service.GromPrefs
 import app.grom.server.store.AndroidKeystoreSecretBox
 import app.grom.server.superserver.AuthMode
+import app.grom.server.superserver.ConfigExport
 import app.grom.server.superserver.LightningKind
 import app.grom.server.superserver.LightningSettings
 import app.grom.server.superserver.SuperServerConfig
 import app.grom.server.superserver.SuperServerConfigStore
 import app.grom.server.superserver.auth.Ed25519
 import app.grom.server.superserver.auth.PasswordHash
+import app.grom.server.superserver.nostr.Nip19
+import app.grom.server.superserver.nostr.RelayUrl
+import app.grom.server.superserver.nostr.RemoteBridgeHint
 import app.grom.server.ui.GromTheme
 import app.grom.server.ui.Palette
 import app.grom.server.ui.actionRow
@@ -96,6 +100,10 @@ class GromActivity : Activity() {
     private lateinit var superPasswordRow: Pair<LinearLayout, TextView>
     private lateinit var superKeysRow: Pair<LinearLayout, TextView>
     private lateinit var superLightningRow: Pair<LinearLayout, TextView>
+    private lateinit var superNpubRow: Pair<LinearLayout, TextView>
+    private lateinit var superRelaysRow: Pair<LinearLayout, TextView>
+    private lateinit var superBridgeRow: Pair<LinearLayout, TextView>
+    private lateinit var superCopyConfigRow: Pair<LinearLayout, TextView>
 
     private var updateState: UpdateState = UpdateState.Idle
 
@@ -377,6 +385,20 @@ class GromActivity : Activity() {
         card.addView(divider(palette))
         superLightningRow = actionRowState(getString(R.string.access_lightning), palette) { showLightningDialog() }
         card.addView(superLightningRow.first)
+        card.addView(divider(palette))
+        superNpubRow = actionRowState(getString(R.string.access_npub), palette) { showNpubDialog() }
+        card.addView(superNpubRow.first)
+        card.addView(divider(palette))
+        superRelaysRow = actionRowState(getString(R.string.access_relays), palette) { showRelaysDialog() }
+        card.addView(superRelaysRow.first)
+        card.addView(divider(palette))
+        superBridgeRow = actionRowState(getString(R.string.access_bridge), palette) { showBridgeDialog() }
+        card.addView(superBridgeRow.first)
+        card.addView(divider(palette))
+        superCopyConfigRow = actionRowState(getString(R.string.access_copy_config), palette) {
+            copyConfigToClipboard()
+        }
+        card.addView(superCopyConfigRow.first)
         return card
     }
 
@@ -421,6 +443,24 @@ class GromActivity : Activity() {
         } else {
             superConfig.lightning.kind.wireName
         }
+        superNpubRow.second.text = superConfig.npub
+            ?.let { Nip19.normalizeNpub(it) ?: it }
+            ?.let { "${it.take(9)}\u2026${it.takeLast(5)}" }
+            ?: getString(R.string.access_npub_none)
+        superRelaysRow.second.text = if (superConfig.relays.isEmpty()) {
+            getString(R.string.access_relays_none)
+        } else {
+            resources.getQuantityString(
+                R.plurals.access_relays_count,
+                superConfig.relays.size,
+                superConfig.relays.size
+            )
+        }
+        superBridgeRow.second.text = superConfig.remoteBridge
+            ?.label
+            ?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.access_bridge_none)
+        superCopyConfigRow.second.text = ""
     }
 
     private fun toggleSuperEnabled() {
@@ -614,6 +654,222 @@ class GromActivity : Activity() {
             }
             .setNegativeButton(R.string.dialog_cancel, null)
             .show()
+    }
+
+    /**
+     * Reference Nostr key (D52). Validation runs before the dialog closes, so a
+     * typo cannot be persisted; a valid hex key is stored in its canonical
+     * `npub1…` form.
+     */
+    private fun showNpubDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            hint = getString(R.string.dialog_npub_hint)
+            setSingleLine()
+            setText(superConfig.npub ?: "")
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_npub_title)
+            .setMessage(R.string.dialog_npub_body)
+            .setView(input)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val raw = input.text.toString().trim()
+                if (raw.isEmpty()) {
+                    persistSuperConfig(superConfig.copy(npub = null))
+                    return@setPositiveButton
+                }
+                val normalized = Nip19.normalizeNpub(raw)
+                if (normalized == null) {
+                    toast(getString(R.string.toast_npub_invalid))
+                    return@setPositiveButton
+                }
+                persistSuperConfig(superConfig.copy(npub = normalized))
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                persistSuperConfig(superConfig.copy(npub = null))
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    /**
+     * Reference relay list (D52). Grom never dials these URLs; the list is a
+     * hand-off for an external bridge. The Add button is intercepted so the
+     * dialog stays open while the operator builds the list.
+     */
+    private fun showRelaysDialog() {
+        val working = ArrayList(superConfig.relays)
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), 0)
+        }
+        val listView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val input = EditText(this).apply {
+            hint = getString(R.string.dialog_relay_hint)
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        }
+        column.addView(listView)
+        column.addView(gap(8))
+        column.addView(input)
+
+        fun renderList() {
+            listView.removeAllViews()
+            if (working.isEmpty()) {
+                listView.addView(text(getString(R.string.access_relays_none), 12f, palette.muted))
+                return
+            }
+            for (relay in working.toList()) {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(4), 0, dp(4))
+                }
+                row.addView(
+                    text(relay, 11f, palette.onSurface).apply {
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.MIDDLE
+                    },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                )
+                row.addView(
+                    text(getString(R.string.dialog_relay_copy), 11f, palette.muted).apply {
+                        setPadding(dp(8), dp(6), dp(8), dp(6))
+                        setOnClickListener {
+                            copyText(relay, R.string.toast_relay_copied)
+                        }
+                    }
+                )
+                row.addView(
+                    text(getString(R.string.dialog_relay_remove), 11f, palette.negative).apply {
+                        setPadding(dp(8), dp(6), dp(8), dp(6))
+                        setOnClickListener {
+                            working.remove(relay)
+                            renderList()
+                        }
+                    }
+                )
+                listView.addView(row)
+            }
+        }
+        renderList()
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_relay_title)
+            .setMessage(R.string.dialog_relay_body)
+            .setView(column)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val normalized = ArrayList<String>()
+                for (relay in working) {
+                    RelayUrl.normalizeRelay(relay)?.let { if (it !in normalized) normalized.add(it) }
+                }
+                persistSuperConfig(superConfig.copy(relays = normalized))
+            }
+            .setNeutralButton(R.string.dialog_relay_add, null)
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val raw = input.text.toString().trim()
+                if (raw.isEmpty()) return@setOnClickListener
+                val normalized = RelayUrl.normalizeRelay(raw)
+                if (normalized == null) {
+                    toast(getString(R.string.toast_relay_invalid))
+                    return@setOnClickListener
+                }
+                if (working.any { RelayUrl.normalizeRelay(it) == normalized }) {
+                    toast(getString(R.string.toast_relay_duplicate))
+                    return@setOnClickListener
+                }
+                if (working.size >= RelayUrl.MAX_RELAYS) {
+                    toast(
+                        resources.getQuantityString(
+                            R.plurals.toast_relay_limit,
+                            RelayUrl.MAX_RELAYS,
+                            RelayUrl.MAX_RELAYS
+                        )
+                    )
+                    return@setOnClickListener
+                }
+                working.add(normalized)
+                input.setText("")
+                renderList()
+            }
+        }
+        dialog.show()
+    }
+
+    /** Free-text label for a tunnel the operator runs elsewhere (D52, D54). */
+    private fun showBridgeDialog() {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), 0)
+        }
+        val labelInput = EditText(this).apply {
+            hint = getString(R.string.dialog_bridge_label)
+            setSingleLine()
+            setText(superConfig.remoteBridge?.label ?: "")
+        }
+        val descriptionInput = EditText(this).apply {
+            hint = getString(R.string.dialog_bridge_description)
+            setSingleLine()
+            setText(superConfig.remoteBridge?.description ?: "")
+        }
+        column.addView(labelInput)
+        column.addView(descriptionInput)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_bridge_title)
+            .setMessage(R.string.dialog_bridge_body)
+            .setView(column)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val hint = RemoteBridgeHint(
+                    label = labelInput.text.toString(),
+                    description = descriptionInput.text.toString()
+                ).normalized()
+                if (hint.isEmpty()) {
+                    persistSuperConfig(superConfig.copy(remoteBridge = null))
+                    return@setPositiveButton
+                }
+                if (hint.validate() != null) {
+                    toast(getString(R.string.toast_bridge_invalid))
+                    return@setPositiveButton
+                }
+                persistSuperConfig(superConfig.copy(remoteBridge = hint))
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                persistSuperConfig(superConfig.copy(remoteBridge = null))
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    /**
+     * Copies the sanitised hand-off document (D53). It is built from the local
+     * config and the measured Lightning health in `status`; it never contains a
+     * password hash, key material or a sealed backend credential.
+     */
+    private fun copyConfigToClipboard() {
+        val superStatus = status?.get("super") as? Map<*, *>
+        val lightningRaw = superStatus?.get("lightningHealth") as? Map<*, *>
+        val lightning: Map<String, Any?> = lightningRaw?.entries
+            ?.filter { it.key is String }
+            ?.associate { it.key as String to it.value }
+            ?: emptyMap()
+        copyText(
+            ConfigExport.render(superConfig, lightning),
+            R.string.toast_config_copied
+        )
+    }
+
+    private fun copyText(value: String, toastRes: Int) {
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        if (clipboard == null) {
+            toast(getString(R.string.toast_invite_copy_failed))
+            return
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("grom", value))
+        toast(getString(toastRes))
     }
 
     private fun updateCard(): View {
