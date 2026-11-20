@@ -129,3 +129,17 @@ jobs:
 
       - name: Agent protocol tests and static gate
         run: ./tools/test-agent-runtime
+
+  site:
+    name: Download page (static, no third parties)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The page is plain HTML/CSS/JS; the gate is the same one a laptop runs,
+      # so a PR that breaks the stable APK links or adds a tracker fails here.
+      - name: Static site gate
+        run: ./tools/check-site

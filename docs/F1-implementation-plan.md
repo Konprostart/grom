@@ -124,6 +124,11 @@ a phone rather than only buildable:
 | Monochrome Auto/Light/Dark operator surface | D36 | review + `:app:lint` |
 | Operator-initiated update check against the release feed | D37 | `JsonParserTest`, `UpdateCheckerTest`, `tools/test-policy` |
 | Release workflow that bundles and verifies the arm64 runtime | D38 | `.github/workflows/release.yml` |
+| Static download page with `?ref=` links and native share | D49 | `tools/check-site`, `.github/workflows/pages.yml` |
+| Local-only invite code, redeem field and share sheet | D50 | `InviteCodeTest`, `tools/test-policy` |
+| Rewards badge that says "coming soon" and nothing else | D51 | `tools/check-site`, `tools/test-policy` |
 
-The version moves to `0.2.0` (versionCode 2). Tags of the form `v*` publish
-APKs; the app reads the latest release. Procedure: `docs/RELEASING.md`.
+The version moves to `0.2.0` (versionCode 2), then `0.3.0` (super server) and
+`0.4.0` (download page + Invite & Earn). Tags of the form `v*` publish APKs
+under stable asset names; the app reads the latest release. Procedure:
+`docs/RELEASING.md`; the page: `docs/DOWNLOAD.md`.

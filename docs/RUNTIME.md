@@ -65,7 +65,7 @@ repository itself stays binary-free. Published releases already contain the
 runtime (D38), so an installed release needs no local step:
 
 ```bash
-adb install -r grom-<version>-server29.apk
+adb install -r grom-server29.apk
 ```
 
 ### B2 — nothing has run on a device

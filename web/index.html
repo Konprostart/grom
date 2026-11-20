@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grom — Your phone. Your own server.</title>
+  <meta name="description" content="Grom is a local server app for Android. Download the latest APK, install it in three steps, and share an invite code.">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">G</span>
+        <span class="brand-text">
+          <span class="wordmark">GROM</span>
+          <span class="brand-sub">LOCAL SERVER · ANDROID</span>
+        </span>
+      </div>
+
+      <div class="theme-toggle js-only" role="group" aria-label="Colour theme">
+        <button type="button" class="theme-btn" data-theme-choice="auto" aria-pressed="true">Auto</button>
+        <button type="button" class="theme-btn" data-theme-choice="light" aria-pressed="false">Light</button>
+        <button type="button" class="theme-btn" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="wrap hero" aria-labelledby="hero-title">
+      <h1 id="hero-title">Your phone. Your own server.</h1>
+      <p class="lede">Grom turns an Android phone into a small local server — a control plane that stays on the device, with an optional public API you turn on yourself.</p>
+
+      <p class="release">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="releaseStatus" aria-live="polite">Latest release</span>
+      </p>
+
+      <a class="btn-primary" id="downloadBtn" href="https://github.com/sveatoken/grom/releases/latest/download/grom-server29.apk" rel="noopener" download>Download Grom for Android</a>
+
+      <p class="secondary">Need the peripheral-only build (Android 8+)? <a class="text-link" href="https://github.com/sveatoken/grom/releases/latest/download/grom-peripheral26.apk" rel="noopener" download>Download peripheral26</a></p>
+
+      <p class="fine-print">Android 10+ · arm64 · ~35 MB · signed with the project's public test key</p>
+    </section>
+
+    <section class="wrap section" aria-labelledby="install-title">
+      <h2 id="install-title">Install in three steps</h2>
+      <ol class="steps">
+        <li>
+          <span class="step-num" aria-hidden="true">1</span>
+          <div class="step-body">
+            <h3>Tap the download button.</h3>
+            <p>The APK saves to your Downloads folder.</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num" aria-hidden="true">2</span>
+          <div class="step-body">
+            <h3>Open the file and allow installs from this source.</h3>
+            <p>Android will ask: 'Allow from this source' (or 'Install unknown apps'). Turn it on for your browser, then tap Install.</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num" aria-hidden="true">3</span>
+          <div class="step-body">
+            <h3>Open Grom and tap Start server.</h3>
+            <p>The status card tells you the truth: Running, Stopped, or Runtime missing.</p>
+          </div>
+        </li>
+      </ol>
+      <p class="fine-print">Sideloading means the app did not come from the Play Store. Android will warn you; that is expected. Only install the file you downloaded from this page.</p>
+    </section>
+
+    <section class="wrap section" id="invite" aria-labelledby="invite-title">
+      <h2 id="invite-title">Invite friends</h2>
+
+      <div class="card invite-card" id="refCard" hidden>
+        <h3 class="card-title">You were invited</h3>
+        <p class="label">Your friend's code</p>
+        <p class="code-display" id="refCode"></p>
+        <div class="actions">
+          <button type="button" class="btn-secondary" id="copyRefBtn">Copy code</button>
+        </div>
+        <p class="instruction">Open Grom → Invite &amp; Earn → Enter a friend's code, then paste it.</p>
+      </div>
+
+      <div class="card invite-card">
+        <h3 class="card-title">Share / Invite friends</h3>
+        <div class="js-only">
+          <p class="label">Your invite code</p>
+          <p class="code-display" id="myCode"></p>
+          <div class="actions">
+            <button type="button" class="btn-secondary" id="copyMyBtn">Copy code</button>
+            <button type="button" class="btn-secondary" id="copyLinkBtn">Copy link</button>
+            <button type="button" class="btn-secondary" id="shareBtn">Share invite</button>
+          </div>
+          <p class="link-display" id="inviteLink"></p>
+          <p class="instruction">Send your code or link to a friend. They open the link, then paste the code in the app.</p>
+        </div>
+        <noscript>
+          <p class="instruction">Your invite code is generated in the browser, so it needs JavaScript. The download button and install steps above work without it.</p>
+        </noscript>
+      </div>
+
+      <p class="sr-only" id="copyStatus" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="wrap section" aria-labelledby="about-title">
+      <h2 class="sr-only" id="about-title">About Grom</h2>
+      <div class="columns">
+        <div class="column">
+          <h3>What it is</h3>
+          <ul>
+            <li>A local server app for Android.</li>
+            <li>A control API bound to 127.0.0.1 by default.</li>
+            <li>An optional public API you enable yourself with a password or Ed25519 key.</li>
+            <li>Open source under Apache-2.0.</li>
+          </ul>
+        </div>
+        <div class="column">
+          <h3>What it is not</h3>
+          <ul>
+            <li>A hosted service, a cloud account, or a wallet.</li>
+            <li>A way to bypass your carrier's NAT.</li>
+          </ul>
+          <p class="column-note">No traffic is sent anywhere unless you ask for an update check.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap section" aria-labelledby="rewards-title">
+      <h2 class="pill" id="rewards-title">Crypto rewards — coming soon</h2>
+      <p class="fine-print">There is no rewards program yet. Nothing is paid out, and the app shows no earnings. This page will be updated when that changes.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p><a class="text-link" href="https://github.com/sveatoken/grom" rel="noopener">Grom is open source (Apache-2.0)</a></p>
+      <p>This is a test build signed with a public key — not a production identity.</p>
+      <p>© <span id="year">2026</span> Grom</p>
+    </div>
+  </footer>
+</body>
+</html>

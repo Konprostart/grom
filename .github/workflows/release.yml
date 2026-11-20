@@ -80,12 +80,14 @@ jobs:
       - name: Verify APK contents and signature
         run: |
           set -euo pipefail
-          version="${TAG#v}"
           mkdir -p dist
+          # Assets carry a stable, version-free name so that the download page
+          # can use releases/latest/download/grom-server29.apk forever (D49).
+          # The version lives in the release tag and in the app's own build.
           for flavour in server29 peripheral26; do
             apk="$(find "app/build/outputs/apk/$flavour/release" -name '*.apk' | head -1)"
             test -n "$apk"
-            out="dist/grom-${version}-${flavour}.apk"
+            out="dist/grom-${flavour}.apk"
             cp "$apk" "$out"
             unzip -l "$out" | grep -q 'lib/arm64-v8a/libnode.so'
             unzip -l "$out" | grep -q 'assets/node/grom-agent.js'
@@ -105,12 +107,23 @@ jobs:
             gh release upload "$TAG" dist/*.apk dist/SHA256SUMS --clobber
           else
             gh release create "$TAG" dist/*.apk dist/SHA256SUMS \
-              --title "Grom $TAG" \
+              --title "Grom ${TAG#v}" \
               --notes "Android server role (server29) and peripheral role (peripheral26), both with the verified arm64 bionic Node runtime bundled.
+
+          Download page (one tap, no GitHub account):
+
+              https://sveatoken.github.io/grom/
+
+          Direct download:
+
+              https://github.com/sveatoken/grom/releases/latest/download/grom-server29.apk
+              https://github.com/sveatoken/grom/releases/latest/download/grom-peripheral26.apk
 
           Install over adb:
 
-              adb install -r grom-${TAG#v}-server29.apk
+              adb install -r grom-server29.apk
+
+          Or sideload on the phone: Android 10+, arm64, allow installs from this source.
 
           The app checks this release feed for updates (Update card -> Check now)."
           fi

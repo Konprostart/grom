@@ -307,3 +307,13 @@ The data plane is covered by JVM unit and integration tests only:
 `SuperServerIntegrationTest` runs over a real loopback socket, and the auth,
 Lightning and transport units are plain JVM tests. No device run, benchmark or
 CI result is claimed for this feature.
+
+## 9. Device facts in status
+
+### S5-R031
+The authenticated `GET /v1/status` MAY include a `referral` object describing
+the device's local invite record (D50): `code`, `referredBy`, `shares`, and
+`rewards: "coming_soon"`. It MUST NOT appear in `GET /v1/health`, which is
+answered without credentials (S5-R004), and it is never transmitted anywhere
+else. No amount, pending reward, remote install count or attribution exists
+(D51).

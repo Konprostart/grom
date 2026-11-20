@@ -1,0 +1,59 @@
+name: pages
+
+# Deploy the static download page in `web/` to GitHub Pages (D49).
+#
+# The page has no build step: what is in `web/` is what is served. The only
+# pre-deploy check is `tools/check-site`, the same gate a laptop runs, so a
+# broken page cannot be published and a published page cannot drift from the
+# rules (stable APK links, no trackers, no innerHTML).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
+      - "tools/check-site"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: validate and deploy the download page
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate the site
+        run: tools/check-site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Creates the Pages site on the first run instead of failing with
+          # "Get Pages site failed" when the operator has never opened
+          # Settings -> Pages by hand.
+          enablement: true
+
+      - name: Upload the static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

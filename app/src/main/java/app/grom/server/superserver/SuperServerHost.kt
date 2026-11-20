@@ -5,6 +5,7 @@ import android.content.Context
 import app.grom.server.core.BindResolution
 import app.grom.server.core.SuperBindPolicy
 import app.grom.server.http.HttpResponse
+import app.grom.server.referral.ReferralStore
 import app.grom.server.store.AndroidKeystoreSecretBox
 import app.grom.server.store.SecretBox
 import app.grom.server.superserver.auth.LoginLimiter
@@ -40,6 +41,14 @@ class SuperServerHost(
     private val lock = Any()
     private val configStore = SuperServerConfigStore(File(context.filesDir, "grom"))
     private val secretBox: SecretBox = AndroidKeystoreSecretBox()
+
+    /**
+     * The device's local referral record (D50). It describes *this* device, not
+     * the data plane, so it is reported only to callers already allowed to see
+     * the full status: the loopback control plane and an authenticated
+     * `GET /v1/status`. The unauthenticated `/v1/health` never includes it.
+     */
+    private val appContext: Context = context.applicationContext
 
     @Volatile
     private var config: SuperServerConfig = SuperServerConfig.defaults()
@@ -107,7 +116,8 @@ class SuperServerHost(
             "streams" to events.subscriberCount(),
             "plugins" to registry.all().map {
                 mapOf("id" to it.id, "capabilities" to it.capabilities().sorted())
-            }
+            },
+            "referral" to ReferralStore.summary(appContext)
         )
     }
 

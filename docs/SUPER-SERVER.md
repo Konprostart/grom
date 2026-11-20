@@ -124,6 +124,9 @@ export TOKEN=$(curl -s -X POST "$BASE/v1/auth/login" \
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status"
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/plugins"
 
+# the device's own invite record (D50) is part of that status document
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status" | grep -o '"referral":{[^}]*}'
+
 # agent plugin: status, then a whitelisted op
 curl -s -X POST "$BASE/v1/plugins/agent/rpc" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -291,3 +294,27 @@ writer; the auth, Lightning and transport classes have plain JVM tests. Nothing
 here has been run on a physical device or benchmarked; those tests are the only
 evidence. The UI path, the Android Keystore seal and the actual network bind of a
 LAN/PUBLIC address are code-reviewed, not measured.
+
+## 9. The `referral` field in status
+
+An authenticated `GET /v1/status` includes the device's local invite record
+(S5-R031, D50):
+
+```json
+"referral": {
+  "code": "K7M2Q9XA",
+  "referredBy": null,
+  "shares": 0,
+  "rewards": "coming_soon"
+}
+```
+
+`code` and `referredBy` are 4–12 characters from the Crockford base32 alphabet;
+`referredBy` is `null` until the operator pastes a friend's code in the app.
+`shares` counts copy/share actions started on this device, not people reached.
+`rewards` is always `"coming_soon"` — there is no amount, no pending value and
+no reward ledger (D51).
+
+None of it is in `GET /v1/health`, which answers without credentials. Referral
+data is device identity; it belongs to the control plane, not a data endpoint
+anyone who reaches the port can read (D39).

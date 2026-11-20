@@ -501,3 +501,68 @@ supposed to control where their money traffic goes.
 
 *Enforced by:* `HttpJsonClient`, `LnbitsBackend`,
 `SuperServerConfig.validate`, `tools/test-policy` (17).
+
+## D49 — The download page is static, and release assets have stable names
+**ACCEPTED.** Distribution gets one human address:
+`https://sveatoken.github.io/grom/`. It is plain HTML, CSS and one small script
+deployed by GitHub Pages from `web/`; there is no build step, no framework, no
+third-party script, no cookie and no analytics. The page has exactly one
+optional network call — the public releases API — used to show the current
+version and to point the primary button at the exact asset. With JavaScript
+off, rate-limited or offline, the button still works because it is an ordinary
+link to `releases/latest/download/grom-server29.apk`.
+
+For that link to survive version bumps, release assets are published under
+**version-free names**, `grom-server29.apk` and `grom-peripheral26.apk`; the
+version lives in the release tag, the release title and the app's own build.
+The in-app update checker selects assets by the role substring, so the stable
+names are compatible with it (D37).
+
+*Why:* the previous names embedded the version (`grom-0.3.0-server29.apk`),
+which makes any permanent download URL impossible. A stable name is the only
+way to give a non-technical person one link that keeps working.
+
+*Enforced by:* `.github/workflows/release.yml` (asset naming),
+`.github/workflows/pages.yml` (deployment), `tools/check-site` (static,
+dependency-free, stable links), `docs/DOWNLOAD.md`.
+
+## D50 — Referral identity is local-only and never leaves the device
+**ACCEPTED.** An invite code is a random local identifier, not an account. It
+is drawn from a Crockford base32 alphabet (no `I`, `L`, `O` or `U`), generated
+once with `SecureRandom`, stored in app-private preferences, and never
+transmitted. Entering a friend's code stores it locally and is reported as
+exactly that: Grom has no registry, so it cannot confirm that a code exists, and
+the dialog says so. The copy/share counter counts actions started on this
+device, not people reached.
+
+Where the record is visible: the loopback control plane (`/grom/v1/status`,
+`IGromServer.statusJson`) and the **authenticated** `GET /v1/status` of the
+super server, under `referral`. The unauthenticated `GET /v1/health` never
+carries it — that endpoint is reachable by anyone who can reach the bound
+address, and D39 keeps device facts on the control plane.
+
+The share link itself is a `res/values/strings.xml` template
+(`invite_link`), not a compiled-in URL in Kotlin, so the "one absolute URL in
+server code" rule of D48 and `tools/test-policy` (17) is unchanged.
+
+*Why:* a referral program that reports installs would give Grom its first
+device identifier and its first mandatory outbound call. Both contradict S1,
+D37 and D48. A local code still lets people share a link and paste a code
+without turning the app into a tracking client.
+
+*Enforced by:* `InviteCode`, `ReferralStore`, `GromActivity` (Invite & Earn),
+`SuperServerHost.status`, `SuperRouter` (`/v1/health` has no referral block),
+`tools/test-policy` (17) and `tools/check-site`.
+
+## D51 — Rewards are "coming soon", never implied and never simulated
+**ACCEPTED.** The app shows a fixed badge, **"Crypto rewards — coming soon"**,
+and one sentence stating that nothing is paid today. There is no balance, no
+pending amount, no estimate, no leaderboard, no count of "people you invited"
+(which Grom cannot know) and no placeholder transaction. The rewards state is
+the literal string `coming_soon` in the status payload.
+
+*Why:* the moment a UI renders an amount that no system owes, the app is lying.
+This project's rule is that a status is either measured or absent (D31, D33).
+
+*Enforced by:* `ReferralStore.REWARDS_COMING_SOON`, the Invite card in
+`GromActivity`, the rewards block on the download page, `tools/check-site`.

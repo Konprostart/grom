@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# check-site — the download page is static, dependency-free and honest (D49).
+#
+# These are invariants of the published page, not of the Android build: the
+# primary download link must be version-free, the page must not load anything
+# from a third party, and it must not be able to inject a `?ref=` value into
+# the DOM. The gate is a fixed count; "13/13" is the number of passes.
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+WEB=web
+FAIL=0
+PASS=0
+
+check() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name" >&2
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+echo "== check-site =="
+
+# 1. the deployable files exist and the site has no build inputs
+check "static files present" \
+  bash -c "test -f $WEB/index.html && test -f $WEB/styles.css && test -f $WEB/app.js && test -f $WEB/favicon.svg && test -f $WEB/404.html"
+check "no package manifest or build step" \
+  bash -c "test ! -e $WEB/package.json && test ! -e $WEB/node_modules"
+
+# 2. the script parses
+check "app.js parses" \
+  node --check "$WEB/app.js"
+
+# 3. no DOM injection surface for the ?ref= value
+check "no HTML injection APIs" \
+  bash -c "! grep -rqE 'innerHTML|outerHTML|insertAdjacentHTML|document\.write' $WEB"
+
+# 4. the site is served from a project subpath, so nothing may be root-absolute
+check "no root-absolute asset references" \
+  bash -c '! grep -nE '\''(src|href)="/'\'' web/*.html && ! grep -q '\''url(/)'\'' web/*.css'
+
+# 5. the one-tap download links are the version-free release assets (D49)
+check "stable server29 download link" \
+  grep -q 'releases/latest/download/grom-server29.apk' "$WEB/index.html"
+check "stable peripheral26 download link" \
+  grep -q 'releases/latest/download/grom-peripheral26.apk' "$WEB/index.html"
+
+# 6. referral support: URL parameter, local persistence, native share,
+#    clipboard with a selection fallback
+check "referral parameter is read and stored" \
+  bash -c "grep -q 'URLSearchParams' $WEB/app.js && grep -q 'grom.referrer' $WEB/app.js && grep -q 'grom.myCode' $WEB/app.js"
+check "share and clipboard paths exist" \
+  bash -c "grep -q 'navigator.share' $WEB/app.js && grep -q 'navigator.clipboard' $WEB/app.js"
+
+# 7. the install instructions name the Android prompt a sideload triggers
+check "allow-from-this-source step present" \
+  bash -c "grep -qi 'allow from this source' $WEB/index.html"
+
+# 8. rewards are labelled as not shipped, never as an amount (D51)
+check "rewards are marked coming soon" \
+  bash -c "grep -qi 'crypto rewards' $WEB/index.html && grep -qi 'coming soon' $WEB/index.html"
+
+# 9. the only external hosts are GitHub itself and the SVG namespace: no CDN,
+#    no analytics, no fonts, no beacons
+check "external hosts allow-listed" \
+  bash -c "
+    hosts=\$(grep -ohE 'https?://[A-Za-z0-9.-]+' $WEB/*.html $WEB/*.js $WEB/*.css $WEB/*.svg 2>/dev/null |
+      sed -E 's#https?://##' | sort -u);
+    unexpected=\$(printf '%s\n' \"\$hosts\" |
+      grep -vE '^(api\.github\.com|github\.com|sveatoken\.github\.io|www\.w3\.org)\$' || true);
+    test -z \"\$unexpected\"
+  "
+
+# 10. no visitor state is collected or shipped anywhere
+check "no analytics or tracking hooks" \
+  bash -c "! grep -rqiE 'google-analytics|googletagmanager|gtag\(|plausible|matomo|segment\.(io|com)|hotjar|sentry' $WEB"
+
+echo
+if [ "$FAIL" -ne 0 ]; then
+  echo "check-site: FAILED ($PASS passed, $FAIL failed)" >&2
+  exit 1
+fi
+echo "check-site: OK ($PASS checks)"

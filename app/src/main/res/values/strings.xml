@@ -128,6 +128,38 @@
     <string name="dialog_key_copy">Copy seed</string>
     <string name="toast_key_copied">Seed copied</string>
 
+    <!-- Invite & Earn (D50, D51). Rewards are not live; the app says so. -->
+    <string name="invite_label">Invite &amp; Earn</string>
+    <string name="invite_title">Invite friends</string>
+    <string name="invite_detail">Share your code. Rewards are not live yet, and Grom never shows earnings it does not have.</string>
+    <string name="invite_your_code">Your code</string>
+    <string name="invite_copy_link">Copy link</string>
+    <string name="invite_share">Share invite</string>
+    <string name="invite_rewards">Crypto rewards \u2014 coming soon</string>
+    <string name="invite_rewards_detail">No rewards are paid today. This badge will change when a program ships.</string>
+    <string name="invite_redeem">Invited by</string>
+    <string name="invite_none">none</string>
+    <string name="invite_not_shared">Not copied or shared yet</string>
+    <plurals name="invite_shares">
+        <item quantity="one">Copied or shared once on this device</item>
+        <item quantity="other">Copied or shared %1$d times on this device</item>
+    </plurals>
+    <string name="invite_share_subject">Join me on Grom</string>
+    <string name="invite_share_text">Join me on Grom \u2014 a local server for Android.\n\n%1$s</string>
+    <string name="invite_share_chooser">Share invite</string>
+    <string name="invite_link" translatable="false">https://sveatoken.github.io/grom/?ref=%1$s</string>
+
+    <string name="toast_invite_saved">Invite code saved: %1$s</string>
+    <string name="toast_invite_invalid">That is not a valid invite code</string>
+    <string name="toast_invite_own_code">That is your own code</string>
+    <string name="toast_invite_copied">Invite link copied</string>
+    <string name="toast_invite_cleared">Invite code cleared</string>
+    <string name="toast_invite_copy_failed">No clipboard available</string>
+
+    <string name="dialog_invite_title">Invited by</string>
+    <string name="dialog_invite_hint">Friend\'s code</string>
+    <string name="dialog_invite_body">Codes are stored on this device only. Grom cannot confirm that a code exists.</string>
+
     <string name="dialog_lightning_title">Lightning backend</string>
     <string name="dialog_lightning_url">HTTPS base URL</string>
     <string name="dialog_lightning_key">API key (leave blank to keep)</string>

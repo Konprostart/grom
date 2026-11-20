@@ -25,6 +25,7 @@ import android.widget.TextView
 import android.widget.Toast
 import app.grom.server.core.BindMode
 import app.grom.server.http.JsonParser
+import app.grom.server.referral.ReferralStore
 import app.grom.server.service.GromPrefs
 import app.grom.server.store.AndroidKeystoreSecretBox
 import app.grom.server.superserver.AuthMode
@@ -81,6 +82,9 @@ class GromActivity : Activity() {
     private lateinit var updateDetail: TextView
     private lateinit var updateAction: TextView
     private lateinit var themeAction: TextView
+    private lateinit var inviteCodeView: TextView
+    private lateinit var inviteSharesView: TextView
+    private lateinit var inviteRedeemRow: Pair<LinearLayout, TextView>
 
     private val superStore by lazy { SuperServerConfigStore(File(filesDir, "grom")) }
     private val secretBox by lazy { AndroidKeystoreSecretBox() }
@@ -123,6 +127,7 @@ class GromActivity : Activity() {
         if (BuildConfig.GROMSERVER) superConfig = superStore.load()
         setContentView(buildUi())
         renderUpdate()
+        renderInvite()
         requestNotificationPermission()
     }
 
@@ -178,6 +183,8 @@ class GromActivity : Activity() {
 
         column.addView(gap(14))
         column.addView(updateCard())
+        column.addView(gap(14))
+        column.addView(inviteCard())
         column.addView(gap(24))
         column.addView(
             text(
@@ -645,6 +652,122 @@ class GromActivity : Activity() {
         return card
     }
 
+    /**
+     * Invite & Earn (D50). The code is generated on this device and never
+     * uploaded; there is no referrer service to check it against. The rewards
+     * badge says what is true: nothing has shipped, and nothing is paid.
+     */
+    private fun inviteCard(): View {
+        val card = card(palette)
+        card.addView(label(getString(R.string.invite_label), palette))
+        card.addView(gap(8))
+        card.addView(
+            text(
+                getString(R.string.invite_title),
+                20f,
+                palette.onSurface,
+                android.graphics.Typeface.BOLD
+            )
+        )
+        card.addView(gap(4))
+        card.addView(
+            text(getString(R.string.invite_detail), 13f, palette.muted).apply {
+                maxLines = 3
+                ellipsize = TextUtils.TruncateAt.END
+            }
+        )
+        card.addView(gap(14))
+
+        val codePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = shape(palette.background, 14, palette.border)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        codePanel.addView(
+            text(
+                getString(R.string.invite_your_code).uppercase(java.util.Locale.ROOT),
+                10f,
+                palette.muted,
+                android.graphics.Typeface.BOLD,
+                letterSpacing = 0.16f
+            )
+        )
+        codePanel.addView(gap(4))
+        inviteCodeView = text(
+            getString(R.string.ui_dash),
+            26f,
+            palette.onSurface,
+            android.graphics.Typeface.BOLD,
+            letterSpacing = 0.28f
+        )
+        codePanel.addView(inviteCodeView)
+        codePanel.addView(gap(2))
+        inviteSharesView = text("", 11f, palette.muted)
+        codePanel.addView(inviteSharesView)
+        card.addView(codePanel)
+        card.addView(gap(12))
+
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val copy = pill(
+            value = getString(R.string.invite_copy_link),
+            textColor = palette.onAccent,
+            fill = palette.accent,
+            rippleColor = palette.ripple
+        ) { copyInviteLink() }
+        val share = pill(
+            value = getString(R.string.invite_share),
+            textColor = palette.onSurface,
+            fill = palette.background,
+            rippleColor = palette.ripple,
+            stroke = palette.border
+        ) { shareInvite() }
+        actions.addView(
+            copy,
+            LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply { setMargins(0, 0, dp(5), 0) }
+        )
+        actions.addView(
+            share,
+            LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply { setMargins(dp(5), 0, 0, 0) }
+        )
+        card.addView(actions)
+        card.addView(gap(12))
+
+        card.addView(
+            text(
+                getString(R.string.invite_rewards).uppercase(java.util.Locale.ROOT),
+                11f,
+                palette.muted,
+                android.graphics.Typeface.BOLD,
+                letterSpacing = 0.14f
+            ).apply {
+                background = shape(palette.background, 999, palette.border)
+                setPadding(dp(12), dp(7), dp(12), dp(7))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+        )
+        card.addView(gap(6))
+        card.addView(text(getString(R.string.invite_rewards_detail), 12f, palette.muted))
+
+        card.addView(gap(6))
+        card.addView(divider(palette))
+        inviteRedeemRow = actionRowState(getString(R.string.invite_redeem), palette) {
+            showRedeemDialog()
+        }
+        card.addView(inviteRedeemRow.first)
+        return card
+    }
+
     // --------------------------------------------------------------- behaviour
 
     private fun bind() {
@@ -843,6 +966,83 @@ class GromActivity : Activity() {
                 updateAction.alpha = 1f
             }
         }
+    }
+
+    private fun renderInvite() {
+        inviteCodeView.text = ReferralStore.code(this)
+        val shares = ReferralStore.shares(this)
+        inviteSharesView.text = if (shares == 0) {
+            getString(R.string.invite_not_shared)
+        } else {
+            resources.getQuantityString(R.plurals.invite_shares, shares, shares)
+        }
+        inviteRedeemRow.second.text =
+            ReferralStore.referrer(this) ?: getString(R.string.invite_none)
+    }
+
+    private fun inviteLink(): String =
+        getString(R.string.invite_link, ReferralStore.code(this))
+
+    private fun copyInviteLink() {
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        if (clipboard == null) {
+            toast(getString(R.string.toast_invite_copy_failed))
+            return
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("grom-invite", inviteLink()))
+        ReferralStore.recordShare(this)
+        renderInvite()
+        toast(getString(R.string.toast_invite_copied))
+    }
+
+    private fun shareInvite() {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.invite_share_subject))
+            putExtra(Intent.EXTRA_TEXT, getString(R.string.invite_share_text, inviteLink()))
+        }
+        try {
+            startActivity(Intent.createChooser(send, getString(R.string.invite_share_chooser)))
+            ReferralStore.recordShare(this)
+            renderInvite()
+        } catch (_: Exception) {
+            // No share sheet on this device: copying the link is the honest
+            // fallback, and it is still an explicit operator action.
+            copyInviteLink()
+        }
+    }
+
+    private fun showRedeemDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            hint = getString(R.string.dialog_invite_hint)
+            setSingleLine()
+            setText(ReferralStore.referrer(this@GromActivity) ?: "")
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_invite_title)
+            .setMessage(R.string.dialog_invite_body)
+            .setView(input)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                when (val result = ReferralStore.redeem(this, input.text.toString())) {
+                    is ReferralStore.Redeem.Applied -> {
+                        renderInvite()
+                        toast(getString(R.string.toast_invite_saved, result.code))
+                    }
+                    ReferralStore.Redeem.OwnCode ->
+                        toast(getString(R.string.toast_invite_own_code))
+                    ReferralStore.Redeem.Invalid ->
+                        toast(getString(R.string.toast_invite_invalid))
+                }
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                ReferralStore.clearReferrer(this)
+                renderInvite()
+                toast(getString(R.string.toast_invite_cleared))
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
     }
 
     private fun checkForUpdates() {

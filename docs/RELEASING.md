@@ -11,11 +11,11 @@ See D37 (update check) and D38 (release build) in `docs/000-decisions.md`.
 `app/build.gradle.kts`:
 
 ```kotlin
-versionCode = 3          // must increase for every installable build
-versionName = "0.3.0"    // the flavour suffix is added by the flavour
+versionCode = 4          // must increase for every installable build
+versionName = "0.4.0"    // the flavour suffix is added by the flavour
 ```
 
-The in-app comparison strips the flavour suffix (`0.3.0-server29` → `0.3.0`) and
+The in-app comparison strips the flavour suffix (`0.4.0-server29` → `0.4.0`) and
 compares numerically, so `0.10.0` is correctly newer than `0.9.0`.
 
 ## 2. Verify locally
@@ -24,14 +24,15 @@ compares numerically, so `0.10.0` is correctly newer than `0.9.0`.
 tools/run-gates
 ```
 
-That builds both debug APKs, runs both JVM suites, all five gate scripts and
-lint, in dependency order (eight steps in total).
+That builds both debug APKs, runs both JVM suites, all six gate scripts
+(including `tools/check-site`) and lint, in dependency order (nine steps in
+total).
 
 ## 3. Release with the runtime included
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 `.github/workflows/release.yml` then:
@@ -41,7 +42,10 @@ git push origin v0.3.0
 3. builds `server29` and `peripheral26` release APKs,
 4. asserts each APK contains `lib/arm64-v8a/libnode.so` and
    `assets/node/grom-agent.js` and passes `apksigner verify`,
-5. attaches `grom-<version>-<flavour>.apk` and `SHA256SUMS` to the release.
+5. attaches **version-free** assets — `grom-server29.apk`,
+   `grom-peripheral26.apk` and `SHA256SUMS` — so the permanent links
+   `releases/latest/download/grom-server29.apk` keep working across releases
+   (D49). The version is in the tag and the release title.
 
 You can also run it manually (Actions → **release** → Run workflow) with an
 existing tag.
@@ -62,7 +66,7 @@ distributing to anyone who is not testing.
 ## 4. Install on a phone
 
 ```bash
-adb install -r grom-0.3.0-server29.apk
+adb install -r grom-server29.apk
 adb shell am start -n app.grom.server/.GromActivity
 ```
 
@@ -70,7 +74,21 @@ The app opens on the status card. With the bundled runtime the state becomes
 `READY` once the agent announces its control port; if it cannot start, the card
 says `Runtime missing` and names the missing file rather than pretending.
 
-## 5. What the update check actually does
+## 5. The download page
+
+`.github/workflows/pages.yml` deploys `web/` to
+**https://sveatoken.github.io/grom/** on every push that touches the page.
+`tools/check-site` runs first, so a page with a root-absolute asset path, a
+third-party script, an injection API or a broken stable download link is never
+published. Pages must use **GitHub Actions** as its source
+(`build_type=workflow`, HTTPS enforced); see `docs/DOWNLOAD.md` §4 for the
+one-line API call that re-creates it.
+
+The page and the release are independent: a tag publishes the APKs, a `web/`
+push publishes the page. The page always resolves `latest`, so neither has to
+run after the other.
+
+## 6. What the update check actually does
 
 - Only on an explicit tap on **Check now** (S1-R033).
 - One HTTPS GET to `https://api.github.com/repos/sveatoken/grom/releases/latest`.
@@ -83,7 +101,7 @@ says `Runtime missing` and names the missing file rather than pretending.
 
 Grom never downloads or installs an APK itself.
 
-## 6. After the release
+## 7. After the release
 
 - The release becomes `releases/latest`; installed builds will see it on their
   next explicit check.

@@ -21,8 +21,9 @@ grom/
 ├── agent/                  grom-agent.js, the supervised Node agent
 ├── sdk/                    app.grom.sdk + AIDL app.grom.sdk.ipc
 ├── testapps/               samecert / foreigncert — the C-008 evidence
+├── web/                    the static download page (GitHub Pages, D49)
 ├── docs/                   000-decisions, specs S1–S5, F1 plan, guides, RELEASING
-├── tools/                  policy, third-party, IPC-signing and agent gates
+├── tools/                  policy, third-party, IPC-signing, agent and site gates
 ├── scripts/                test keys and the arm64 Node runtime pipeline
 ├── third_party/            the dependency ledger
 └── keys/                   TEST-ONLY signing material (see D4)
@@ -50,19 +51,34 @@ behaviour (D31), not a bug.
 
 ## Install
 
-Download the APK for your role from the
-[latest release](https://github.com/sveatoken/grom/releases/latest), then:
+One tap, no GitHub account:
+
+**https://sveatoken.github.io/grom/**
+
+The page resolves the newest release, explains the three install steps
+(including "Allow from this source") and carries an invite code if someone
+shared a `?ref=` link. Direct links, if you prefer them:
 
 ```bash
-adb install -r grom-<version>-server29.apk          # full server role
+adb install -r grom-server29.apk          # full server role, Android 10+
 # or
-adb install -r grom-<version>-peripheral26.apk      # client role, never binds
-sha256sum -c SHA256SUMS                              # optional integrity check
+adb install -r grom-peripheral26.apk      # client role, Android 8+, never binds
+sha256sum -c SHA256SUMS                   # optional integrity check
 ```
 
 Both roles share one application ID and are mutually exclusive installs
 (S1-R007). Releases are signed with the committed test key: installable and
 self-updatable, but not proof of publisher identity.
+
+## Invite & Earn
+
+Each install generates a local invite code and shares
+`https://sveatoken.github.io/grom/?ref=<CODE>`. **Copy link** and **Share
+invite** use the Android share sheet; a friend's code can be pasted under
+**Invite & Earn → Invited by**. Everything is local: there is no referral
+server, no account, no attribution call and no device identifier (D50). The
+rewards badge says **"Crypto rewards — coming soon"** and nothing is paid
+(D51).
 
 ## Updates
 
@@ -73,10 +89,13 @@ release shows its version and a **Download APK** button that opens the matching
 flavour asset in the browser. A failed check is reported as a failure, never as
 "up to date". Grom never downloads or installs an APK itself.
 
-Tagging is the release process: `git tag v0.3.0 && git push origin v0.3.0`
+Tagging is the release process: `git tag v0.4.0 && git push origin v0.4.0`
 runs `.github/workflows/release.yml`, which builds both roles with the runtime
-inside, verifies the contents and signature, and publishes the APKs and
-`SHA256SUMS`. Full procedure: [`docs/RELEASING.md`](docs/RELEASING.md).
+inside, verifies the contents and signature, and publishes
+`grom-server29.apk`, `grom-peripheral26.apk` and `SHA256SUMS` under stable
+names so `releases/latest/download/` links never break (D49). Full procedure:
+[`docs/RELEASING.md`](docs/RELEASING.md); the page itself:
+[`docs/DOWNLOAD.md`](docs/DOWNLOAD.md).
 
 ## Build
 
@@ -102,13 +121,14 @@ gradle :app:assembleServer29Release :app:assemblePeripheral26Release
 ## Conformance
 
 ```bash
-tools/run-gates                           # all 8 gates, in order
+tools/run-gates                           # all 9 gates, in order
 gradle :app:testServer29DebugUnitTest     # JVM policy/logic tests
 gradle :app:lint                          # lint, 0 errors required
 tools/check-third-party                   # dependency ledger matches the build
 tools/test-policy                         # 22 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
 tools/test-agent-runtime                  # grom-agent.js protocol + degradation
+tools/check-site                          # download page: static, no third parties
 tools/verify-ipc-signing                  # C-008, needs the three APKs
 ```
 
@@ -121,7 +141,8 @@ gradle :app:assembleServer29Debug \
 ```
 
 GitHub Actions runs the same set on every push and pull request
-(`.github/workflows/ci.yml`), plus the agent suite on Node 22 and 24.
+(`.github/workflows/ci.yml`), plus the agent suite on Node 22 and 24 and the
+download-page gate as its own job.
 
 ## Using it
 
