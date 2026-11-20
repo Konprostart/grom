@@ -68,7 +68,10 @@ file falls back to the safe defaults and the reason appears in
   "sessionTtlMs": 43200000,
   "maxBodyBytes": 65536,
   "maxConnections": 16,
-  "maxSseClients": 4
+  "maxSseClients": 4,
+  "npub": null,
+  "relays": [],
+  "remoteBridge": null
 }
 ```
 
@@ -89,6 +92,17 @@ Field notes:
   guessed. Only the app's Lightning dialog produces a valid value, so do not
   hand-write this field.
 - `lightning.kind` is the lowercase wire name: `none` or `lnbits`.
+- `npub` (D52) is the operator's Nostr **public** key: a NIP-19 `npub1…`
+  (bech32, 32-byte payload) or a 64-character hex key, stored in canonical
+  lowercase form. An `nsec1…` secret key is rejected. Grom never signs.
+- `relays` (D52) is a list of at most 8 `wss://` or `ws://` URLs. It is a
+  **reference** for an external bridge: Grom opens no WebSocket and no relay
+  connection. A `ws://` URL is accepted because it may be a local relay; the app
+  labels it as plaintext.
+- `remoteBridge` (D52, D54) is `{"label": "…", "description": "…"}`, at most 80
+  and 240 characters. It is a signpost for a tunnel the operator runs elsewhere
+  (SSH, WireGuard, Tailscale); Grom does not start it. A value that looks like a
+  private key, password, API key or bearer token is refused.
 - `acknowledgePublicBind` must be `true` for `PUBLIC`; the app sets it when you
   cycle to *all interfaces*.
 - Bounds: `port` 1–65535 and different from the control port; `maxBodyBytes`
@@ -97,6 +111,11 @@ Field notes:
 - Unknown or malformed individual values fall back to defaults. A typo in
   `bind` therefore yields `LOOPBACK`, not an error; check `super.error` and the
   status address rather than assuming the file was honoured.
+- A malformed `relay` is **not** silently dropped on load: validation reports
+  `BAD_RELAY`, so a typo cannot quietly disappear from the list.
+- Changing only `npub`, `relays` or `remoteBridge` is applied **in place**: the
+  listener is not restarted and active sessions/SSE streams survive (D54).
+  Changing anything else rebuilds the plane and invalidates sessions.
 - `version` is written for future format changes and is not currently read.
 
 ## 3. curl recipes
@@ -126,6 +145,16 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/plugins"
 
 # the device's own invite record (D50) is part of that status document
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status" | grep -o '"referral":{[^}]*}'
+
+# the reference block an external bridge reads (D52, D53)
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status" | grep -o '"npub":[^,]*'
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status" | grep -o '"relays":\[[^]]*\]'
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status" | grep -o '"lightningHealth":{[^}]*}'
+
+# the agent plugin's status carries the same reference block; `health` does not
+curl -s -X POST "$BASE/v1/plugins/agent/rpc" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"op":"status","args":{}}'
 
 # agent plugin: status, then a whitelisted op
 curl -s -X POST "$BASE/v1/plugins/agent/rpc" \
@@ -250,7 +279,7 @@ encrypted tunnel (WireGuard, Tailscale, an SSH tunnel) in front of the port
 Behind CGNAT a phone has no reachable inbound address at all. Binding `PUBLIC`
 or `LAN` does not change that. Use a tunnel initiated **from the device** to a
 host with a public address. There is no port-forwarding recipe that fixes CGNAT
-from the outside.
+from the outside. Section 10 has the concrete pattern for an external VPS.
 
 ## 6. Resource footprint
 
@@ -290,10 +319,13 @@ no connection of its own for events; the client does.
 
 The data plane has JVM unit and integration tests only. `SuperServerIntegrationTest`
 binds `127.0.0.1:0` and exercises the real parser, worker pool, auth path and SSE
-writer; the auth, Lightning and transport classes have plain JVM tests. Nothing
-here has been run on a physical device or benchmarked; those tests are the only
-evidence. The UI path, the Android Keystore seal and the actual network bind of a
-LAN/PUBLIC address are code-reviewed, not measured.
+writer; the auth, Lightning and transport classes have plain JVM tests. The
+reference configuration has its own tests: `Nip19Test` (including the NIP-19
+vector), `RelayUrlTest`, `RemoteBridgeHintTest`, `SuperStatusDocumentTest` and
+`ConfigExportTest` (which asserts that no stored secret appears in the export).
+Nothing here has been run on a physical device or benchmarked; those tests are
+the only evidence. The UI path, the Android Keystore seal and the actual network
+bind of a LAN/PUBLIC address are code-reviewed, not measured.
 
 ## 9. The `referral` field in status
 
@@ -318,3 +350,83 @@ no reward ledger (D51).
 None of it is in `GET /v1/health`, which answers without credentials. Referral
 data is device identity; it belongs to the control plane, not a data endpoint
 anyone who reaches the port can read (D39).
+
+## 10. Reference config for an external VPS bridge
+
+Grom can hold three pieces of **reference configuration** for a bridge that runs
+elsewhere — for example a Nostr/Lightning service on a VPS (D52):
+
+```json
+"npub": "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg",
+"relays": ["wss://relay.example", "ws://127.0.0.1:7777"],
+"remoteBridge": {
+  "label": "Mostro VPS",
+  "description": "SSH reverse tunnel; Grom does not start it"
+}
+```
+
+What Grom does with it: it validates it, persists it in `super-server.json` and
+reports it in the **authenticated** `GET /v1/status` and the `agent` plugin's
+`status` op. `reachable` in `lightningHealth` is `null` until the adapter has
+actually been probed; Grom does not turn "configured" into "healthy".
+
+What Grom does **not** do with it:
+
+- it does not open a WebSocket to a relay;
+- it does not sign a Nostr event (it never has a private key — an `nsec1…`
+  value is refused);
+- it does not start, supervise or health-check a tunnel.
+
+### 10.1 Tunnel patterns
+
+<details>
+<summary>1. Reverse SSH, initiated by the phone</summary>
+
+On the phone (e.g. through Termux or a dedicated key), initiate:
+
+```bash
+ssh -N -R 47002:127.0.0.1:47002 bridge@vps.example
+```
+
+Then on the VPS, `http://127.0.0.1:47002/v1/status` reaches the phone's data
+plane. The VPS never needs an inbound port and the phone needs no public
+address. Keep the data plane on `LOOPBACK`; the tunnel is the only path.
+
+</details>
+
+<details>
+<summary>2. WireGuard / Tailscale / Headscale</summary>
+
+Put the phone and the VPS in the same private network. Two options:
+
+- keep Grom on `LOOPBACK` and let the mesh peer reach it through a local
+  forwarder on the phone;
+- bind `LAN` so the phone's private-network address is reachable directly. This
+  still requires a credential and still speaks plain HTTP inside the encrypted
+  mesh.
+
+</details>
+
+<details>
+<summary>3. Behind CGNAT</summary>
+
+There is no inbound address. `PUBLIC` bind does not help. The tunnel must be
+initiated from the device; patterns 1 and 2 are the supported ones.
+
+</details>
+
+<details>
+<summary>4. TLS</summary>
+
+Grom has no in-process TLS (S5-R029). Put Caddy, nginx or an encrypted tunnel in
+front of the port. On a reverse SSH tunnel, terminate TLS on the VPS.
+
+</details>
+
+`remoteBridge` is a **label**, not an automation. It never changes what Grom
+does; it exists so the operator and the VPS-side config can refer to the same
+tunnel by name. Use the app's **Copy config** action to move the sanitised
+hand-off document (npub, relays, bridge label, data-plane shape, Lightning
+health) to the VPS without ever copying a password hash, a key or a sealed
+backend credential.
+

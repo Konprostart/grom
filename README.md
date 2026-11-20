@@ -22,7 +22,7 @@ grom/
 ├── sdk/                    app.grom.sdk + AIDL app.grom.sdk.ipc
 ├── testapps/               samecert / foreigncert — the C-008 evidence
 ├── web/                    the static download page (GitHub Pages, D49)
-├── docs/                   000-decisions, specs S1–S5, F1 plan, guides, RELEASING
+├── docs/                   000-decisions, specs S1–S5, F1 plan, master plan, roadmap, guides
 ├── tools/                  policy, third-party, IPC-signing, agent and site gates
 ├── scripts/                test keys and the arm64 Node runtime pipeline
 ├── third_party/            the dependency ledger
@@ -125,7 +125,7 @@ tools/run-gates                           # all 9 gates, in order
 gradle :app:testServer29DebugUnitTest     # JVM policy/logic tests
 gradle :app:lint                          # lint, 0 errors required
 tools/check-third-party                   # dependency ledger matches the build
-tools/test-policy                         # 22 static invariants
+tools/test-policy                         # 24 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
 tools/test-agent-runtime                  # grom-agent.js protocol + degradation
 tools/check-site                          # download page: static, no third parties
@@ -166,11 +166,34 @@ It is **off by default and loopback-only** until an operator changes it.
 
 Enable it in the app's **Public API** card: *Enable*, *Bind* (loopback / LAN /
 all interfaces), *Auth* (password / key / both), *Password*, *API keys*
-(Ed25519) and *Lightning*. Enabling needs a password or a key; a non-loopback
-bind is refused without a credential, and *all interfaces* binds `0.0.0.0` only
-after an explicit acknowledgement. Changes are applied by the running server
-through `reloadSuperServer()` (IPC API 2); every reload invalidates existing
-sessions.
+(Ed25519), *Lightning*, and the three reference rows below. Enabling needs a
+password or a key; a non-loopback bind is refused without a credential, and
+*all interfaces* binds `0.0.0.0` only after an explicit acknowledgement. Changes
+are applied by the running server through `reloadSuperServer()` (IPC API 2);
+changing anything except the reference rows invalidates existing sessions.
+
+### Reference config for an external bridge (D52–D54)
+
+The **Nostr npub**, **Nostr relays** and **Remote bridge** rows store
+configuration for a bridge that runs elsewhere (for example a Mostro VPS). Grom
+**validates and reports** them; it never signs a Nostr event, never opens a
+relay connection and never starts a tunnel:
+
+| field | accepted | what Grom does |
+|---|---|---|
+| `npub` | NIP-19 `npub1…` (32-byte bech32) or 64-char hex, stored canonical | reports it |
+| `relays` | up to 8 `ws://` / `wss://` URLs, no userinfo/query/fragment | lists them |
+| `remoteBridge` | label ≤80, description ≤240, no secret-looking text | labels a tunnel you run |
+
+They appear in the **authenticated** `GET /v1/status` (and the `agent` plugin's
+`status` op) as `npub`, `relays`, `remoteBridge` and `lightningHealth`, and in
+the **Copy config** document — an allow-list that never contains a password
+hash, key material or the sealed backend credential (D53). Changing only these
+three fields reloads in place, so sessions and SSE streams survive (D54). The
+unauthenticated `/v1/health` never carries them.
+
+The tunnel pattern (reverse SSH, WireGuard/Tailscale, CGNAT, TLS) is documented
+in [`docs/SUPER-SERVER.md`](docs/SUPER-SERVER.md) §10.
 
 | endpoint | purpose |
 |---|---|

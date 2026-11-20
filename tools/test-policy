@@ -5,7 +5,7 @@
 # about the shape of the tree: manifest permissions, absent symbols, headers.
 # See D1, D2, D5, D15, D18, D21, D39…D47 and S1-R002…S1-R012, S5-R001…S5-R026.
 #
-# The gate is intentionally a fixed count: "22/22" is the number of passes.
+# The gate is intentionally a fixed count: "24/24" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -126,6 +126,18 @@ check "backend URL must be https" \
 # 22. the super server is built from code, never loaded dynamically (D39)
 check "no dynamic plugin loading" \
   bash -c "! grep -rnE 'Class\.forName|DexClassLoader|PathClassLoader|ScriptEngine' $MAIN/superserver --include='*.kt'"
+
+# 23. the npub / relay reference package never opens a connection (D52).
+#     Relays are reference configuration for an external VPS; Grom itself has
+#     no WebSocket client and no outbound HTTP in this package.
+check "nostr reference package opens no connection" \
+  bash -c "! grep -rnE 'Socket|openConnection|HttpURLConnection|WebSocket|okhttp|java\.net\.URL' $MAIN/superserver/nostr --include='*.kt'"
+
+# 24. the status document and the config export are allow-lists, never a
+#     serialisation of the whole config (D53). A credential field appearing in
+#     either file is a leak, so the identifiers must be absent outright.
+check "status and export carry no credential fields" \
+  bash -c "! grep -rnE 'passwordHash|apiKeySealed|nsec1|PRIVATE KEY' $MAIN/superserver/SuperStatusDocument.kt $MAIN/superserver/ConfigExport.kt"
 
 echo
 TOTAL=$((PASS + FAIL))

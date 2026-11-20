@@ -566,3 +566,70 @@ This project's rule is that a status is either measured or absent (D31, D33).
 
 *Enforced by:* `ReferralStore.REWARDS_COMING_SOON`, the Invite card in
 `GromActivity`, the rewards block on the download page, `tools/check-site`.
+
+## D52 — npub and relays are reference configuration; Grom dials no relay
+**ACCEPTED.** `SuperServerConfig` gains `npub`, `relays` and `remoteBridge`.
+They exist so an external VPS bridge (for example a Mostro fork) can read the
+operator's Nostr public key and relay list from the authenticated
+`GET /v1/status` (and from the app's *Copy config* action) while Grom stays the
+local control point.
+
+The boundary is absolute: none of these fields causes a network connection,
+a signature or a tunnel. `npub` is validated as a NIP-19 bech32 key with a
+32-byte payload (or a 64-character hex key normalised to bech32); an `nsec1…`
+secret is rejected because Grom never holds a Nostr private key. `relays` is a
+list of at most 8 `ws://`/`wss://` URLs; a plaintext `ws://` is accepted only
+because it may be a local relay, and the UI says so. `remoteBridge` is a
+label/description (80/240 chars) and cannot contain a key, password, API key or
+bearer token.
+
+Per Q1/verified operation: the tunnel is the operator's (SSH, WireGuard,
+Tailscale) and is initiated from the device. Grom does not start it. Per Q4:
+LNbits stays the only Lightning adapter inside Grom; LND/CLN/NWC stay on the
+VPS. `peripheral26` is unchanged.
+
+*Why:* the alternative — a relay client and a tunnel supervisor inside the app —
+would add an outbound network surface and a second set of credentials to a
+server whose whole value is that it does one thing honestly. A reference list
+gives the bridge what it needs without any of that.
+
+*Enforced by:* `Nip19`, `RelayUrl`, `RemoteBridgeHint`, `SuperServerConfig.
+validate` (`BAD_NPUB`, `BAD_RELAY`, `TOO_MANY_RELAYS`, `BAD_REMOTE_BRIDGE`),
+`tools/test-policy` (23).
+
+## D53 — status and "Copy config" are allow-lists, never a serialised config
+**ACCEPTED.** The reference block in status is built by `SuperStatusDocument`,
+and the hand-off document by `ConfigExport`. Both name every field they emit;
+neither serialises `SuperServerConfig`. The export carries `npub`, `relays`,
+`remoteBridge`, the data-plane shape and the Lightning backend's location and
+measured health. It never carries `passwordHash`, public key material, the
+sealed backend key, session tokens or audit records.
+
+`lightningHealth.reachable` is `null` until the adapter has actually been
+probed. `status()` does not call the backend, so a poll cannot turn "configured"
+into "healthy", and an unreachable backend cannot make the status call slow.
+
+*Why:* a "copy my config" button that serialises the object is one field away
+from pasting a password hash into a chat window. An allow-list makes a future
+field safe by default.
+
+*Enforced by:* `ConfigExportTest` (sentinel secrets), `SuperStatusDocumentTest`,
+`LightningPluginTest`, `tools/test-policy` (24).
+
+## D54 — a reference-only change does not restart the listener
+**ACCEPTED.** `SuperServerHost.reload()` compares the loaded config with the
+running one via `sameRuntimePolicy`, which nulls only `npub`, `relays` and
+`remoteBridge`. When nothing else changed, it updates the in-memory config and
+appends `super.reload.reference`; sessions and SSE streams survive. Any other
+change rebuilds the whole plane, as before, and invalidates sessions.
+
+The `agent` plugin's `status` reads the reference block through a callback at
+call time, so it sees the new values without a registry rebuild.
+
+*Why:* editing a relay URL should not log out a paired client or drop an event
+stream. The distinction is safe because those three fields are read by no
+listener, no authenticator and no rate limiter.
+
+*Enforced by:* `SuperServerConfigTest.sameRuntimePolicyIgnoresOnlyReferenceFields`,
+`AgentPluginTest`, `SuperServerHost.reload`.
+

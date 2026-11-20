@@ -43,7 +43,7 @@ step "JVM tests (both flavours)" gradle_run \
   :app:testServer29DebugUnitTest \
   :app:testPeripheral26DebugUnitTest
 
-step "static policy (22 checks)" ./tools/test-policy
+step "static policy (24 checks)" ./tools/test-policy
 step "third-party ledger" ./tools/check-third-party
 step "IPC signing (C-008)" ./tools/verify-ipc-signing
 step "agent secrets (stdin, not argv)" ./tools/test-agent

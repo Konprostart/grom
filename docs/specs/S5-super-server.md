@@ -82,9 +82,14 @@ and MUST refuse with one of these stable codes:
 | `BAD_BACKEND_TIMEOUT` | Lightning timeout outside `1..30` seconds |
 | `INSECURE_BACKEND_URL` | Lightning `baseUrl` does not start with `https://` |
 | `BAD_BACKEND_URL` | URL longer than 512 characters or containing whitespace |
+| `BAD_NPUB` | `npub` is neither a valid NIP-19 `npub1…` nor a 64-character hex key |
+| `BAD_RELAY` | a `relays` entry is not a valid `ws://` or `wss://` URL |
+| `TOO_MANY_RELAYS` | more than 8 distinct relays |
+| `BAD_REMOTE_BRIDGE` | bridge label/description too long, contains control characters, or resembles a secret |
 
 The check order is: port, conflict, the three limit bounds, session TTL,
-bind/credential rules, auth-mode rules, keys, backend. The first failure wins.
+bind/credential rules, auth-mode rules, keys, backend, reference config
+(npub, relays, bridge hint). The first failure wins.
 A refusal MUST leave the server unbound, record the code and message in
 `lastError`, and append a `super.refused` audit entry with the code as detail. A
 stored password hash that cannot be decoded MUST refuse with `BAD_PASSWORD_HASH`.
@@ -317,3 +322,45 @@ the device's local invite record (D50): `code`, `referredBy`, `shares`, and
 answered without credentials (S5-R004), and it is never transmitted anywhere
 else. No amount, pending reward, remote install count or attribution exists
 (D51).
+
+## 10. Reference configuration (D52–D54)
+
+### S5-R032
+`SuperServerConfig` MAY carry `npub`, `relays` and `remoteBridge` as reference
+configuration for an external bridge. They MUST validate as follows: `npub` is
+a NIP-19 `npub1…` with a valid bech32 (not bech32m) checksum and a 32-byte
+payload, or a 64-character hex key normalised to that form; every relay is a
+`ws://`/`wss://` URL with a host, an optional port in `1..65535` and no userinfo,
+query or fragment; at most 8 distinct relays; the bridge hint is at most 80
+(label) / 240 (description) characters, contains no control characters and
+resembles no secret. A stored secret (`nsec1…`, a PEM private key, a
+password/API-key/token assignment or a bearer token) MUST be refused with
+`BAD_REMOTE_BRIDGE`.
+
+Grom MUST NOT open a network connection because of any of these fields: no
+WebSocket client, no relay dial, no Nostr signing and no tunnel supervision. The
+`superserver/nostr` package MUST contain no socket, HTTP client or WebSocket
+symbol.
+
+### S5-R033
+The authenticated `GET /v1/status` and the `agent` plugin's `status` op MUST
+include `npub` (canonical form or `null`), `relays` (canonical list) and
+`remoteBridge` (`{label, description}` or `null`), plus
+`lightningHealth: {configured, backend, reachable, error}`. The
+`lightningHealth.reachable` value MUST be `null` until the Lightning adapter's
+`health` op has actually run; a configured backend is not a reachable one. `GET /v1/health` and the
+`agent` plugin's `health` op MUST NOT include the reference block.
+
+### S5-R034
+Changing only `npub`, `relays` or `remoteBridge` MUST be applied without stopping
+the listener: `sameRuntimePolicy` compares the whole configuration with those
+three fields nulled, and a reference-only reload updates the in-memory config and
+appends `super.reload.reference` without invalidating sessions or SSE streams. A
+change to any other field MUST rebuild the plane exactly as before.
+
+The "Copy config" export is built from an explicit allow-list, never by
+serialising `SuperServerConfig`. It MUST NOT contain the password hash, any key
+material, the sealed backend credential, session tokens or audit records; the
+static gate asserts that the credential identifiers are absent from
+`ConfigExport` and `SuperStatusDocument`.
+

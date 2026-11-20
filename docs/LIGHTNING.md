@@ -90,6 +90,22 @@ wallet document has no numeric `balance` gives `503 LIGHTNING_UNAVAILABLE`
 false` and an `error` string in `status` when the stored credential cannot be
 opened.
 
+The `lightning` plugin's `status` document (and the `lightningHealth` block in
+`/v1/status`, D53) reports `reachable` as **`null`** until the `health` op has
+actually run. `status` never probes the backend: a poll must not turn
+"configured" into "healthy", and an unreachable backend must not make a status
+request slow. After a `health` call the measured result and its `probedAtMs` are
+reported; a later status shows that measurement, not a fresh guess.
+
+```json
+"lightningHealth": {
+  "configured": true,
+  "backend": "lnbits",
+  "reachable": null,
+  "error": null
+}
+```
+
 ## 5. Wiring a real LNbits wallet
 
 1. Run LNbits behind **https** (a TLS terminator in front of it is fine). The
