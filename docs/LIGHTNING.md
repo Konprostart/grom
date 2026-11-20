@@ -208,7 +208,8 @@ SSH) initiated from the device, or a backend hosted somewhere reachable.
 
 The Lightning adapter has JVM unit tests only. `LightningPluginTest` uses a fake
 backend and `LnbitsBackendTest` uses an injected transport, so neither opens a
-backend socket; `HttpJsonClientTest` runs against a local
-`com.sun.net.httpserver` bound to `127.0.0.1`. No test in this repository has run
+backend socket; `HttpJsonClientTest` runs against a hand-written HTTP/1.1 server
+on `127.0.0.1` (a raw `ServerSocket`, because the Android unit-test classpath
+does not expose `jdk.httpserver`). No test in this repository has run
 against a live wallet, and no device, benchmark or CI result is claimed for the
 Lightning path.

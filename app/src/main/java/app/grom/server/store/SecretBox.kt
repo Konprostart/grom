@@ -11,7 +11,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Seals small secrets at rest (D41).
+ * Seals small secrets at rest (D44).
  *
  * Grom never keeps a wallet key, but it may keep the API credential that lets an
  * operator-configured Lightning backend be reached. That credential is a bearer
