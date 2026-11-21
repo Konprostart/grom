@@ -28,9 +28,20 @@ balance, no account, no settlement, no payment credential.
 
 ### S1-R003
 Grom MUST NOT initiate an outbound connection to the internet on its own. There
-is no telemetry, analytics or crash reporting. The single exception is the
-operator-initiated update check (S1-R033): one HTTPS GET to the public release
-feed, only after the operator explicitly asks for it.
+is no telemetry, analytics or crash reporting. Outbound connections are limited
+to three explicit, operator-initiated cases:
+
+1. the update check (S1-R033): one HTTPS GET to the public release feed, only
+   after the operator asks for it;
+2. the operator-configured Lightning backend (D48), using a URL supplied at
+   runtime and never compiled in;
+3. the operator-saved SSH target (D58): a reverse-tunnel session to a host the
+   operator entered, opened only by an explicit tap, restricted to
+   `tcpip-forward`, with a pinned host key and a client-side filter that allows
+   only the local data plane as a destination.
+
+There is no scheduler, no retry loop and no connection that Grom starts by
+itself.
 
 ### S1-R004
 Grom MUST be usable with no account, no sign-in, and no cloud component.
@@ -180,3 +191,23 @@ The operator surface MUST be usable in both light and dark mode, and the mode
 MUST be an explicit operator choice (Auto / Light / Dark) rather than something
 the app changes on its own (D36).
 
+
+## 12. Embedding (D55)
+
+### S1-R035
+The server engine MUST be usable as an Android library (`:engine`) by a host
+application that is the same trust domain. In that mode the service is declared
+`exported="false"` with no IPC permission, and the engine MUST refuse to start
+until the host has recorded operator consent.
+
+### S1-R036
+`start` MUST report only that the platform accepted the foreground-service
+launch. Readiness, runtime presence and project liveness MUST be measured from
+the running server, never inferred from a configuration flag.
+
+### S1-R037
+The embedded surface (`projectsJson`, `announceProject`, `removeProject`,
+`configExportJson`, `agentExec`, the SSH methods and `lightningProbeJson`) MUST
+pass the same per-transaction signature gate as the API 1 surface (S4-R007).
+Embedding does not relax the gate; it only makes caller and service the same
+UID.

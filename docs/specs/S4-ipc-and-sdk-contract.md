@@ -170,11 +170,72 @@ is not running it fails as `GROM_E_SERVER_STOPPED`, and in the peripheral role a
 failure; it is reported through `statusJson()` under `super.error` (S5-R003).
 
 ### S4-R031
-`GromClient.API_VERSION` is `2`. Clients MUST compare the value returned by
-`apiVersion()` before calling `reloadSuperServer()` (S4-R012).
+`GromClient.API_VERSION` is `3` (it was `2` in the previous release). Clients
+MUST compare the value returned by `apiVersion()` before calling a method
+introduced in a later API (S4-R012). A client that only needs API 2 methods
+keeps working against an API 3 server.
 
 ### S4-R032
 A reload invalidates every password session of the data plane, because the
 session store is rebuilt with the listener (S5-R014). Clients that held a session
 token MUST sign in again; Ed25519 keys registered in the new configuration keep
 working.
+
+## 9. API 3 — the embeddable surface (D55)
+
+### S4-R033
+`apiVersion()` returns `3`. API 3 is additive: every API 1 and API 2 method is
+unchanged in name, signature and behaviour.
+
+### S4-R034
+API 3 adds:
+
+```aidl
+String projectsJson();
+String announceProject(String json);
+void   removeProject(String id);
+String configExportJson();
+String agentExec(String op, String argsJson);
+String sshStatusJson();
+String sshGenerateKeyJson();
+String sshSaveTarget(String draftJson);
+void   sshDeleteTarget(String id);
+String sshConnect(String id, String trustFingerprint);
+void   sshDisconnect(String id);
+void   sshClearPin(String id);
+String lightningProbeJson();
+```
+
+Every method MUST call `requireSameSigner()` before touching server state, so a
+client with a different certificate still receives `GROM_E_FORBIDDEN`.
+
+### S4-R035
+`projectsJson()` MUST return the stored records with `state` derived from the
+heartbeat (`alive` for at most 90 seconds). `announceProject` MUST validate the
+id, title, version, package and capabilities before writing, and MUST NOT accept
+a caller-supplied `state`. Errors are `GROM_E_BAD_PROJECT`,
+`GROM_E_TOO_MANY_PROJECTS` or `GROM_E_PROJECT_NOT_FOUND`.
+
+### S4-R036
+`configExportJson()` MUST return the same sanitised allow-list document as the
+UI's *Copy config* action (D53). It MUST NOT contain a password hash, key
+material, a sealed credential, a session token or an audit record.
+
+### S4-R037
+`agentExec` MUST pass the op through the same whitelist as the loopback HTTP API
+and return `{"status":…,"body":…}`. A failure returned by the agent is data in
+that envelope; the Binder call itself fails only for local reasons (quarantine,
+missing runtime, unknown op).
+
+### S4-R038
+`sshConnect` is blocking (bounded by the 15 s connect and 15 s auth timeouts).
+It MUST return a JSON result with `ok`, `state` and either `fingerprint`/
+`learned` or a stable `code`. `HOST_KEY_UNVERIFIED` includes the observed
+fingerprint so the caller can ask the operator; `HOST_KEY_MISMATCH` includes the
+pin and the observed value and MUST NOT connect.
+
+### S4-R039
+`lightningProbeJson()` runs the adapter's `health` op now and returns its
+measured result. It MUST NOT report `reachable: true` without a successful
+backend probe, and it MUST answer `DATA_PLANE_STOPPED` when the public plane is
+not running.

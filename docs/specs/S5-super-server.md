@@ -364,3 +364,29 @@ material, the sealed backend credential, session tokens or audit records; the
 static gate asserts that the credential identifiers are absent from
 `ConfigExport` and `SuperStatusDocument`.
 
+
+### S5-R035
+The authenticated `GET /v1/status` and the `agent` plugin's `status` op MUST
+include a `bridge` block
+`{configured, connected, active, tunnels:[{id, label, state, sinceMs, lastError}]}`
+and a `projects` array of `{id, title, version, package, capabilities,
+registeredAtMs, lastSeenMs, state}`. `connected` MUST be true only while a
+tunnel is actually up; `state` is derived from the heartbeat (D57, D59).
+
+The `bridge` block MUST NOT contain the SSH host, username, port or host-key
+fingerprint. Those stay on the device; the on-screen status may include them.
+
+### S5-R036
+`GET /v1/health` MUST remain unchanged: it carries no `bridge`, `projects`,
+`npub`, `relays`, `remoteBridge`, referral or Lightning data.
+
+### S5-R037
+The Lightning lamp/data MUST be based on a measured probe. `lightningHealth.
+reachable` is `null` until `lightningProbeJson()` (or the plugin's `health` op)
+has run; status polling MUST NOT call the backend.
+
+### S5-R038
+The sanitised export MUST include `bridge` and `projects` and MUST continue to
+omit every credential. The static gate asserts that `ConfigExport` and
+`SuperStatusDocument` contain no credential identifier, and the sentinel test
+asserts that no SSH address, password hash or sealed key reaches the document.

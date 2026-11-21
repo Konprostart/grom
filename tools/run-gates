@@ -39,11 +39,13 @@ step "build (APKs for the signing gate)" gradle_run \
   :testapps:samecert:assembleDebug \
   :testapps:foreigncert:assembleDebug
 
-step "JVM tests (both flavours)" gradle_run \
+step "JVM tests (engine and both flavours)" gradle_run \
+  :engine:testDebugUnitTest \
+  :sdk:testDebugUnitTest \
   :app:testServer29DebugUnitTest \
   :app:testPeripheral26DebugUnitTest
 
-step "static policy (24 checks)" ./tools/test-policy
+step "static policy (29 checks)" ./tools/test-policy
 step "third-party ledger" ./tools/check-third-party
 step "IPC signing (C-008)" ./tools/verify-ipc-signing
 step "agent secrets (stdin, not argv)" ./tools/test-agent

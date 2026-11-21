@@ -11,9 +11,9 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-LAUNCHER="app/src/main/java/app/grom/server/agent/AgentLauncher.kt"
-CONFIG="app/src/main/java/app/grom/server/core/AgentConfig.kt"
-PROCESS="app/src/main/java/app/grom/server/agent/NodeAgentProcess.kt"
+LAUNCHER="engine/src/main/java/app/grom/server/agent/AgentLauncher.kt"
+CONFIG="engine/src/main/java/app/grom/server/core/AgentConfig.kt"
+PROCESS="engine/src/main/java/app/grom/server/agent/NodeAgentProcess.kt"
 
 FAIL=0
 PASS=0
@@ -49,7 +49,7 @@ check "no shell is used to launch" \
 
 # --- dynamic ------------------------------------------------------------------
 echo "  ..   running JVM tests"
-if gradle -q :app:testServer29DebugUnitTest \
+if gradle -q :engine:testDebugUnitTest \
     --tests 'app.grom.server.agent.*' \
     --tests 'app.grom.server.core.AgentConfigTest' \
     --console=plain \

@@ -129,7 +129,7 @@ a phone rather than only buildable:
 | Rewards badge that says "coming soon" and nothing else | D51 | `tools/check-site`, `tools/test-policy` |
 
 The version moved to `0.2.0` (versionCode 2), then `0.3.0` (super server),
-`0.4.0` (download page + Invite & Earn) and `0.5.0` (reference configuration
+`0.4.0` (download page + Invite & Earn), `0.5.0` (reference configuration
 for an external bridge). Tags of the form `v*` publish APKs
 under stable asset names; the app reads the latest release. Procedure:
 `docs/RELEASING.md`; the page: `docs/DOWNLOAD.md`.

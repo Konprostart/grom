@@ -12,6 +12,7 @@ Task ids (`T-nn`) match §U of the master plan.
 |---|---|---|
 | **0 — F1 walking skeleton** | **done** | `docs/F1-implementation-plan.md` §Status, 9/9 steps |
 | **1A — reference configuration** | **done** | `npub` (NIP-19), `relays` (reference only), `remoteBridge` (label/description), exposed in authenticated `/v1/status` and the sanitized Copy-config export; D52–D54 |
+| **1C — embeddable engine, dashboard, SSH bridge** | **done** | `engine/` library, `GromEmbed`, API 3, `projects/`, `ssh/`, `DashboardModel`, sections UI; D55–D60 |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -19,7 +20,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.5.0` (versionCode 5). The nine gates in `tools/run-gates` are
+Current version: `0.6.0` (versionCode 6). The nine gates in `tools/run-gates` are
 the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
@@ -54,7 +55,13 @@ task either consumes a validated manifest or is blocked on one existing.
 `A → B` means B cannot start until A is green.
 
 ```
-Phase 0 (F1) ─▶ Phase 1A (done) ─▶ Phase 1B ─▶ Phase 2 ─▶ Phase 3 ─▶ Phase 4 ─▶ Phase 5 ─▶ Phase 6
+Phase 0 (F1) ─▶ Phase 1A (done) ─▶ Phase 1C (done) ─▶ Phase 1B ─▶ Phase 2 ─▶ Phase 3 ─▶ Phase 4 ─▶ Phase 5 ─▶ Phase 6
+
+Phase 1C is orthogonal to 1B: it changed *where* the server lives and how an
+operator sees it, not the application-manager core. It is sequenced first only
+because the engine extraction touches every file, and doing it after the
+Application Manager would have made a large mechanical move collide with new
+code.
 
 Phase 1B   T-01 ─▶ T-02 ─▶ T-03 ─▶ T-04       (T-05, T-06, T-07, T-08 beside it; T-09 last)
 Phase 2    T-10 ─▶ T-11 ─▶ {T-12, T-13, T-18, T-38}; T-05 ─▶ T-14 ─▶ T-15 ─▶ T-16 ─▶ T-17 ─▶ T-19
@@ -131,6 +138,31 @@ The records are **D52** (reference configuration, never dialled), **D53**
 (status and export are allow-lists), **D54** (a reference-only change does not
 restart the listener), with the normative text in S5-R032–R034. If the log, the
 spec and the code ever disagree, that is a defect in 1A and the phase reopens.
+
+### Phase 1C — embeddable engine, dashboard, SSH bridge — **done**
+
+Delivered:
+
+| file | what it is |
+|---|---|
+| `engine/` | the server as an Android library (`app.grom.engine`); every server package moved here, `app/` is a host |
+| `engine/.../embed/GromEmbed.kt` | consent, start, embedded client, bounded project registration |
+| `engine/.../projects/ProjectRegistry.kt` | project records with heartbeat-derived `alive`/`stale`, atomic file, 8 projects |
+| `engine/.../ssh/SshTarget.kt` | target model, validators, draft, limits (8 targets, 2 active) |
+| `engine/.../ssh/SshTargetStore.kt` | sealed secrets, TOFU pin storage, no plaintext on disk |
+| `engine/.../ssh/SshKeys.kt` | Ed25519 generation, OpenSSH `PROTOCOL.key` writer, one loader for generated and imported keys |
+| `engine/.../ssh/SshTunnelManager.kt` | MINA SSHD client, TOFU verify, one `tcpip-forward`, `SshForwardingPolicy` |
+| `sdk/.../IGromServer.aidl` | API 3: projects, export, agentExec, SSH, lightning probe |
+| `app/.../ui/DashboardModel.kt` | pure lamp projection (green only for measured values) |
+| `app/.../GromActivity.kt` | hero + "Now serving" + collapsible sections |
+| `docs/EMBEDDING.md`, `docs/SSH-BRIDGE.md` | host guide and bridge guide |
+
+Gate: `tools/run-gates` 9/9, policy **29/29**, `SshTunnelManagerTest` proving a
+real reverse forward against an in-process SSH server, `DashboardModelTest`,
+both flavours green, lint 0/0.
+
+Not closed by this phase: **nothing here has run on a phone.** The SSH tunnel is
+proven against a real SSH implementation on the JVM, not on device hardware.
 
 ### Phase 1B — core hardening — **next**
 

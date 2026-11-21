@@ -633,3 +633,169 @@ listener, no authenticator and no rate limiter.
 *Enforced by:* `SuperServerConfigTest.sameRuntimePolicyIgnoresOnlyReferenceFields`,
 `AgentPluginTest`, `SuperServerHost.reload`.
 
+
+## D55 — the server engine is an embeddable library; `app` is a host
+**ACCEPTED.** Every server package moved from `app/` to a new `:engine` Android
+library (`app.grom.engine`): supervisor, control plane, data plane, audit chain,
+secret store, project registry and SSH bridge. `:sdk` (AIDL + `GromClient`) is
+its `api` dependency. `app/` keeps only the operator surface, the two role
+flavours and the Node runtime binaries.
+
+The engine manifest declares `GromService` with `exported="false"` and no IPC
+permission: an embedded server is private to its host. The standalone
+`server29` flavour replaces that declaration (`tools:node="replace"`) with the
+public, `signature`-gated one. The per-transaction signature check is unchanged
+and applies in both cases.
+
+A host uses `GromEmbed`:
+`recordConsent` → `start(options)` → `newClient` (Target.EMBEDDED). The engine
+never starts itself: a persistent server is a visible operator decision, and
+`start` refuses without recorded consent. `start` reports that the launch was
+*requested*, never that the agent is ready.
+
+*Why:* "install my app and the phone becomes a server" cannot be built by adding
+an SDK to a separate app. It requires the engine in the host's own UID, where
+`requireSameSigner()` is satisfied by construction and no second installation
+exists. Extracting the library is mechanical; the security boundary is not
+weakened because the host is the server.
+
+*Cost, stated plainly:* the host's UID can read every Grom file (token, audit,
+sealed SSH credentials). Embedding is for hosts that are the same trust domain
+as the server. Anything else must use the standalone app.
+
+*Enforced by:* merged manifests (`EmbeddedManifest` policy check 25/26),
+`GromEmbed` consent gate, `tools/test-policy` 25–26, `docs/EMBEDDING.md`.
+
+## D56 — the dashboard shows measured lamps; everything else is collapsible
+**ACCEPTED.** The screen is a header, a hero status with the single Start/Stop
+action, a "Now serving" card with four lamps (control plane, data plane, bridge,
+project) and collapsible sections for runtime, external servers,
+Nostr & Lightning, local projects, public access, update and invite.
+
+The lamp rule is absolute:
+
+| Lamp | Meaning |
+|---|---|
+| green | a measured positive value (`running`, `reachable`, `alive`, `connected`) |
+| red | a measured negative value, or an explicit error |
+| grey | not configured / never measured |
+
+`enabled = true` is configuration and can never produce green. Every lamp is
+paired with text, and the mapping is a pure function in `DashboardModel`, tested
+on the JVM. Section open/closed state is presentation-only, stored in
+`GromPrefs`.
+
+*Why:* a dashboard that turns green because a flag is set is worse than no
+dashboard. The projection being pure means the rule has tests instead of
+screenshots.
+
+*Enforced by:* `DashboardModelTest` (every lamp mapping), `SshTunnelManagerTest`
+(measured bridge state), `LightningPluginTest` (no green before a probe).
+
+## D57 — projects register themselves and liveness is derived
+**ACCEPTED.** An embedded host may register a project
+(`id`, `title`, `version`, `package`, `capabilities`). The record lives in
+`files/grom/projects.json` and is written atomically, owner-only, with a size
+cap. A project is `alive` only while its last heartbeat is at most 90 seconds
+old; afterwards it is `stale`.
+
+The caller supplies no `state`: `state` is computed at read time and is not
+persisted as a claim. Registration is not evidence that a process is running.
+At most 8 projects are kept; ids follow the plugin-id shape, titles are at most
+64 characters and capabilities at most 12 short names. The file contains no
+secret.
+
+*Why:* a registry that trusts a `"running": true` field would be trivial to
+fake and would make the dashboard lie. A heartbeat has a cost — the host must
+keep announcing — which is exactly the property we want to measure.
+
+*Enforced by:* `ProjectRegistryTest`, `ProjectRegistry`, `tools/test-policy`.
+
+## D58 — the SSH bridge is a client that can only forward one port
+**ACCEPTED.** Grom opens a reverse SSH session to an operator-saved target and
+requests one `tcpip-forward` from that host to the local data plane. It is the
+only outbound TCP client in the engine besides the loopback agent client and
+the Lightning adapter.
+
+Hard rules:
+
+* **TOFU pinning.** A target with no pin is refused; the attempt reports the
+  observed `SHA256:` fingerprint. The operator confirms; the pin is stored. A
+  changed key is `HOST_KEY_MISMATCH`, never "accept anyway". A caller-supplied
+  trust value cannot override an existing pin. Changing host or port drops the
+  pin.
+* **No shell.** No shell, exec, subsystem, agent or X11 channel is ever opened.
+  `SshForwardingPolicy` additionally accepts a `forwarded-tcpip` channel only
+  for loopback on the data-plane port, so even a hostile server cannot reach
+  another service on the phone.
+* **Sealed secrets.** Password or private key is stored only as
+  `AndroidKeystoreSecretBox` ciphertext. Plaintext exists only for the duration
+  of a connect and never reaches a log, audit record or status document.
+* **Measured state.** `connected` only after the server acknowledged the
+  forward. A stopped data plane is `DATA_PLANE_NOT_RUNNING`. At most 2 active
+  tunnels, 8 saved targets, 15 s connect/auth timeouts.
+* **Explicit action only.** A tunnel is opened by an operator tap in the UI;
+  there is no auto-connect and no background retry.
+
+This amends S1-R003: outbound connections are still limited to the update feed,
+the operator-configured Lightning backend and now the operator-saved SSH
+targets.
+
+*Why:* a phone behind CGNAT can serve a VPS only if it dials out. Doing that
+with a real SSH implementation, a pinned host key and a one-destination filter
+is narrower than any VPN or tunnel daemon, and it removes the need for a
+second process.
+
+*Enforced by:* `SshTunnelManagerTest` (real MINA server, real forward, bytes
+through the tunnel, cap, mismatch), `SshForwardingPolicyTest`,
+`SshTargetStoreTest`, `SshKeysTest`, `tools/test-policy` 27–29,
+`docs/SSH-BRIDGE.md`.
+
+## D59 — status gains the bridge and projects, but not the operator's addresses
+**ACCEPTED.** The authenticated `/v1/status` and the `agent` plugin's `status`
+op gain:
+
+* `projects`: id, title, version, capabilities and derived state;
+* `bridge`: `configured`, `connected`, `active` and per-tunnel
+  `{id, label, state, sinceMs, lastError}`.
+
+`/v1/health` is unchanged and still carries none of this (D39). The SSH host,
+username, port and fingerprint are **not** in the server-facing status: they are
+configuration of the phone, not information a remote bridge needs. The on-screen
+`statusForUi()` includes them because the operator is looking at their own
+device.
+
+`ConfigExport` gains `bridge` and `projects` using the same allow-list
+discipline as D53. The Lightning lamp can only become green after a real
+`health` op; `lightningProbeJson()` is that explicit probe, and it audits the
+result.
+
+*Why:* the VPS should know whether the bridge is up and which projects are
+alive, not where the phone dials from. Splitting the two views keeps the
+outbound credential surface on the device.
+
+*Enforced by:* `ConfigExportTest` (address sentinel), `SshTunnelManagerTest`
+(status has no host/user), `SuperStatusDocumentTest`, `DashboardModelTest`.
+
+## D60 — SSH key material is generated on the device and sealed
+**ACCEPTED.** Key authentication prefers an Ed25519 pair generated inside the
+app. The engine uses the CC0 EdDSA provider, writes the private half as an
+unencrypted OpenSSH key blob (`PROTOCOL.key`, cipher `none`) only long enough to
+hand it to `SecretBox`, and exposes the public line for
+`~/.ssh/authorized_keys`. An operator may instead paste an existing
+OpenSSH/PEM key; it is validated by parsing it and then sealed the same way.
+
+Both generated and imported keys travel through one loader
+(`SshKeys.keyPairFromPrivateText`), so there is one failure mode and one test
+surface. The OpenSSH blob is never written to disk unsealed and never appears in
+a status or export document. Because MINA SSHD's exception peeler references
+`javax.management.ReflectionException`, which Android does not ship, the engine
+provides a minimal stand-in and narrows lint's `InvalidPackage` suppression to
+that reference.
+
+*Why:* requiring a laptop to generate a key is the difference between a feature
+an operator uses and one they skip. Generating on-device and sealing immediately
+keeps the private key out of every file, backup and bug report.
+
+*Enforced by:* `SshKeysTest` (round-trip through MINA's loader), `SshTargetStoreTest`
+(no plaintext on disk), `tools/test-policy` 28.

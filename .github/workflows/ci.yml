@@ -66,9 +66,10 @@ jobs:
             :testapps:samecert:assembleDebug \
             :testapps:foreigncert:assembleDebug
 
-      - name: JVM tests (server29 and peripheral26)
+      - name: JVM tests (engine, server29 and peripheral26)
         run: |
           gradle --no-daemon --stacktrace \
+            :engine:testDebugUnitTest \
             :app:testServer29DebugUnitTest \
             :app:testPeripheral26DebugUnitTest
 
@@ -91,7 +92,10 @@ jobs:
           name: test-reports
           path: |
             app/build/reports/tests/
+            engine/build/reports/tests/
+            sdk/build/reports/tests/
             app/build/reports/lint-results-*.html
+            engine/build/reports/lint-results-*.html
           if-no-files-found: warn
 
       - name: Runtime readiness (informational)

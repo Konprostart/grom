@@ -31,8 +31,12 @@ pass
 # --- collect declared dependencies from Gradle files -------------------------
 BUILD_FILES=$(find . -name 'build.gradle.kts' -not -path './build/*' 2>/dev/null)
 
-# external coordinates such as implementation("group:artifact:version")
-DEP_COORDS=$(grep -hoE '"(com\.android[^"]*|org\.jetbrains\.kotlin[^"]*|junit:junit[^"]*)"' $BUILD_FILES 2>/dev/null | tr -d '"' | sort -u)
+# External coordinates such as implementation("group:artifact:version"). The
+# pattern is intentionally generic so a dependency added in the future cannot
+# escape the ledger by not matching a hard-coded whitelist. A quoted string
+# without a colon (an applicationId, a flavour name, a Gradle property) does not
+# match; project(":engine") starts with ':' and does not match either.
+DEP_COORDS=$(grep -hoE '"[A-Za-z][A-Za-z0-9_.-]*:[A-Za-z][A-Za-z0-9_.-]*(:[^"]*)?"' $BUILD_FILES 2>/dev/null | tr -d '"' | sort -u)
 
 # map coordinates (including plugin ids) to the names used in the document
 doc_name_for() {
@@ -45,6 +49,12 @@ doc_name_for() {
       echo "Kotlin standard library" ;;
     junit:junit*)
       echo "JUnit" ;;
+    org.apache.sshd:sshd-core*)
+      echo "Apache MINA SSHD" ;;
+    net.i2p.crypto:eddsa*)
+      echo "EdDSA-Java" ;;
+    org.slf4j:slf4j-*)
+      echo "SLF4J" ;;
     *)
       echo "" ;;
   esac

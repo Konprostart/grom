@@ -4,7 +4,7 @@
 authority for money.**
 
 This document is the architecture and delivery plan for Grom *after* F1 and the
-super server. It starts from what the tree actually contains at `0.5.0`, states
+super server. It starts from what the tree actually contains at `0.6.0`, states
 what Dukoi (`github.com/thisuxhq/dukoi`, Apache-2.0) does that is worth keeping,
 and specifies the components that turn a supervised loopback API into a server
 that can host an operator's own applications. It is a plan: where a statement
@@ -19,7 +19,7 @@ A claim without a tag is a statement about the plan, not about the product.
 
 | tag | meaning |
 |---|---|
-| `[SHIPPED]` | In the tree at `0.5.0` and covered by an automated check. |
+| `[SHIPPED]` | In the tree at `0.6.0` and covered by an automated check. |
 | `[PLANNED]` | Designed here, not built. The proving gate is named. |
 | `[RESEARCH]` | Feasible, but a licence, size, ABI or platform question is open. Doing it is a spike, not a task. |
 | `[DEVICE]` | Cannot be settled without hardware. Nothing in this repository has run on a physical device. |
@@ -49,6 +49,11 @@ A claim without a tag is a statement about the plan, not about the product.
 | Node 24.22.3 bionic arm64 runs, including `node:sqlite` | `[SHIPPED]` as a host-executed artefact — `scripts/fetch-node-android.sh --verify` |
 | Super server: password + Ed25519, SSE, plugins, bounds | `[SHIPPED]` at JVM-test level — S5, `SuperServerIntegrationTest` |
 | Reference config (`npub`, `relays`, `remoteBridge`) | `[SHIPPED]` — D52–D54, S5-R032–R034; validated, reference-only, in authenticated `/v1/status` and the sanitized Copy-config export |
+| Embeddable engine (`:engine`) + API 3 | `[SHIPPED]` at JVM-test level — D55, `GromEmbed`, `ProjectRegistryTest`; manifests proven by policy checks 25/26 |
+| Dashboard lamps and collapsible sections | `[SHIPPED]` at JVM-test level — D56, `DashboardModelTest` |
+| Project registry with heartbeat-derived liveness | `[SHIPPED]` at JVM-test level — D57, `ProjectRegistryTest` |
+| Reverse SSH bridge (TOFU, `tcpip-forward` only) | `[SHIPPED]` against a real in-process SSH server — D58, `SshTunnelManagerTest`; **not** on hardware |
+| Bridge/project status, no operator addresses off-device | `[SHIPPED]` — D59, `ConfigExportTest` sentinel, `SshTunnelManagerTest` |
 | Anything on a physical phone | **not proven.** No `adb` in the build environment |
 | Application Manager, other runtimes, multi-device | `[PLANNED]` |
 

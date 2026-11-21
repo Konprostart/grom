@@ -45,6 +45,18 @@ any extra operator step.
 | Nothing has run on a physical device | **open** — no `adb` in the build environment; boot receiver, vendor task-killers and battery policy are unverified on hardware |
 | Production signing key | **open** — releases use the committed test key (D4) and say so |
 
+The server is now an **embeddable library** (`:engine`, D55) and the app is one
+possible host. The operator surface is a measured dashboard with collapsible
+sections (D56), apps can register themselves as projects (D57), and an operator
+can open a reverse SSH tunnel to a VPS without a second process (D58).
+
+| Item | State |
+|---|---|
+| Embedding (`GromEmbed`, API 3) | **delivered** — `:engine` + `:sdk`, consent gate, project registry |
+| Dashboard lamps | **delivered** — pure `DashboardModel`, green only for measured values |
+| SSH bridge | **delivered in code** — TOFU pin, `tcpip-forward` only, one-destination filter, sealed credentials; proven against a real SSH server in JVM tests |
+| SSH bridge on a device | **open** — never run on hardware, like the rest of the server |
+
 When the runtime is genuinely absent, the app reports `MISSING_RUNTIME` and the
 agent endpoints answer `503` naming the missing file. That is the designed
 behaviour (D31), not a bug.
@@ -89,7 +101,7 @@ release shows its version and a **Download APK** button that opens the matching
 flavour asset in the browser. A failed check is reported as a failure, never as
 "up to date". Grom never downloads or installs an APK itself.
 
-Tagging is the release process: `git tag v0.5.0 && git push origin v0.5.0`
+Tagging is the release process: `git tag v0.6.0 && git push origin v0.6.0`
 runs `.github/workflows/release.yml`, which builds both roles with the runtime
 inside, verifies the contents and signature, and publishes
 `grom-server29.apk`, `grom-peripheral26.apk` and `SHA256SUMS` under stable
@@ -122,10 +134,11 @@ gradle :app:assembleServer29Release :app:assemblePeripheral26Release
 
 ```bash
 tools/run-gates                           # all 9 gates, in order
-gradle :app:testServer29DebugUnitTest     # JVM policy/logic tests
+gradle :engine:testDebugUnitTest          # engine: supervisor, HTTP, data plane, SSH
+gradle :app:testServer29DebugUnitTest     # app: dashboard projection, update check
 gradle :app:lint                          # lint, 0 errors required
 tools/check-third-party                   # dependency ledger matches the build
-tools/test-policy                         # 24 static invariants
+tools/test-policy                         # 29 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
 tools/test-agent-runtime                  # grom-agent.js protocol + degradation
 tools/check-site                          # download page: static, no third parties
@@ -157,6 +170,32 @@ curl -s http://127.0.0.1:47001/grom/v1/health
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/status
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/audit/verify
 ```
+
+## Embedding Grom in your app
+
+Grom is a library first and an app second. An application that depends on
+`:engine` gets the whole server inside its own package — no second install, no
+IPC permission — and starts it with one call after the operator consents:
+
+```kotlin
+GromEmbed.recordConsent(context)
+GromEmbed.start(context, GromEmbed.Options("my-wallet", "My Wallet", "1.2.0"))
+```
+
+The project then appears in **Local projects** with a lamp driven by its
+heartbeat, and can call the agent through `agentExec`. See
+[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the API 3 surface, the runtime
+requirement and the trust-boundary cost.
+
+## Reverse SSH bridge
+
+**External servers** opens a reverse tunnel from the phone to a VPS you own. It
+is the answer to CGNAT: the device dials out, the VPS gets a loopback port that
+reaches Grom's data plane. The session may only request `tcpip-forward`; there
+is no shell, no exec and no agent forwarding, the host key is pinned on first
+use, and the client-side filter allows one destination — the local data plane.
+Credentials are generated (Ed25519) or pasted, and always sealed by the Android
+Keystore. See [`docs/SSH-BRIDGE.md`](docs/SSH-BRIDGE.md).
 
 ## Super server (public API)
 
