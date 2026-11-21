@@ -46,9 +46,11 @@ any extra operator step.
 | Production signing key | **open** — releases use the committed test key (D4) and say so |
 
 The server is now an **embeddable library** (`:engine`, D55) and the app is one
-possible host. The operator surface is a measured dashboard with collapsible
-sections (D56), apps can register themselves as projects (D57), and an operator
-can open a reverse SSH tunnel to a VPS without a second process (D58).
+possible host. The operator surface is a measured dashboard that keeps only the
+state, Start/Stop and the "Now serving" lamps, with every configuration section
+one tap away behind the header menu (D56, D68). Apps can register themselves as
+projects (D57), and an operator can open a reverse SSH tunnel to a VPS without a
+second process (D58).
 
 | Item | State |
 |---|---|
@@ -202,10 +204,16 @@ runtime requirement and the trust-boundary cost.
 
 ## How Grom works
 
-The last section of the app explains, in plain language, what Grom does, why most
-people need no rented server, when an external SSH server helps, and how the
-Telegram alerts work. It is static and reports no state, so it cannot claim
-anything is running.
+The last card of the app, immediately after the invite code, explains in plain
+language what Grom does, why most people need no rented server, when an external
+SSH server helps, what the Nostr/Lightning and local-project rows mean, how the
+Telegram alerts work, and — last — what Grom cannot do when the phone is off or
+offline. It is static, is open on first run, and reports no state, so it cannot
+claim anything is running.
+
+Everything else (external servers, Nostr & Lightning, local projects, alerts,
+public access, supervision, updates) lives in the **Menu** button in the top
+right, next to the theme switch.
 
 ## Telegram alerts
 

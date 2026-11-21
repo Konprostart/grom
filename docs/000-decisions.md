@@ -834,6 +834,10 @@ language: what Grom does, why most people need no rented server, and when an
 external SSH server helps. The content lives in `HelpModel` + `strings.xml`, is
 fixed at three blocks, and reports no state.
 
+> **Amended by D68:** the section is now open on first run, sits immediately
+> after the invite card, and has seven blocks. The static-content rule and the
+> test below are unchanged.
+
 The test asserts the block count and order, that every string exists, and that
 the text contains no URL, no currency, no `balance`, no `payout`, and no uptime
 promise. The only honesty claim it is allowed to make is that a down link is
@@ -950,3 +954,38 @@ the address of their infrastructure.
 *Enforced by:* `NotifySettingsStoreTest` (no plaintext on disk),
 `NotifyRulesTest` (no `detail` passthrough), `TelegramNotifierTest` (no token in
 an error), `ConfigExportTest` (chat-ID sentinel), `tools/test-policy` 24/33.
+
+## D68 — The dashboard keeps only state, Start/Stop and the serving lamps; everything else opens from a header menu
+**ACCEPTED.** The page is now: header (wordmark, **Menu**, theme switch), the
+status hero with Start/Stop, the "Now serving" card with its four measured
+lamps, then — at the very bottom — the invite card and, immediately after it,
+the "How Grom works" explanation. Runtime, external servers, Nostr & Lightning,
+local projects, Telegram alerts, public access and updates are no longer cards
+on the page: they open from a menu in the top-right corner, in that order,
+because that is the order in which ignoring them breaks something.
+
+The menu order is data, not layout: `MenuModel.entries(serverRole)` returns the
+list and `MenuModelTest` pins it. A build without a server (`peripheral26`)
+gets the update entry only, because it has no tunnel, no projects and no
+alerts, and listing them would open empty dialogs.
+
+Every section panel is still built once, exactly as before, and kept detached;
+opening one reparents it into a dialog. That keeps every `render*` pointing at a
+live view, so an opened section is never stale, no card is rebuilt twice, and
+the periodic refresh keeps updating an open panel.
+
+The explanation was extended from three blocks to seven (what Grom does, no
+rented server, the external SSH booster, Nostr/Lightning, local projects,
+Telegram alerts, and the honest limits), and it is open by default on first run
+because it now sits below everything else and cannot push the dashboard down.
+D62's static-content rule is unchanged: no block reads state.
+
+*Why:* the operator opens the app to see whether the server is up and to start
+or stop it. Six collapsed cards between the hero and the invite code made the
+things that matter compete with the things that are configured once. Nothing is
+removed — only moved behind one tap — and no lamp, secret or gate changes.
+
+*Enforced by:* `MenuModelTest` (order, uniqueness, role split, strings exist),
+`HelpModelTest` (block count and order, no address/price/uptime claim),
+`tools/run-gates` (lint stays at 0/0, all three JVM suites).
+

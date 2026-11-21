@@ -157,7 +157,8 @@ Delivered:
 | `engine/.../ssh/SshTunnelManager.kt` | MINA SSHD client, TOFU verify, one `tcpip-forward`, `SshForwardingPolicy` |
 | `sdk/.../IGromServer.aidl` | API 3: projects, export, agentExec, SSH, lightning probe |
 | `app/.../ui/DashboardModel.kt` | pure lamp projection (green only for measured values) |
-| `app/.../GromActivity.kt` | hero + "Now serving" + collapsible sections |
+| `app/.../ui/MenuModel.kt` | menu order (`ssh` … `update`), role split, section titles |
+| `app/.../GromActivity.kt` | hero + "Now serving", header Menu, invite + help at the bottom |
 | `docs/EMBEDDING.md`, `docs/SSH-BRIDGE.md` | host guide and bridge guide |
 
 Gate: `tools/run-gates` 9/9, policy **29/29**, `SshTunnelManagerTest` proving a
