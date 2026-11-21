@@ -3,10 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D64 and S1-R002…S1-R012,
-# S5-R001…S5-R041.
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D67 and S1-R002…S1-R012,
+# S5-R001…S5-R044.
 #
-# The gate is intentionally a fixed count: "31/31" is the number of passes.
+# The gate is intentionally a fixed count: "33/33" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -102,13 +102,14 @@ check "every IPC transaction applies the signature gate" \
 check "no usesCleartextTraffic" \
   bash -c "! grep -rq 'usesCleartextTraffic' app/src engine/src"
 
-# 17. the only hardcoded outbound URL in server code is the operator-initiated
-#     update feed (D37, S1-R003/S1-R033). A Lightning backend URL is supplied by
-#     the operator at runtime, never compiled in (D48).
+# 17. exactly two hosts may be compiled in, and each in exactly one file: the
+#     operator-initiated update feed (D37, S1-R003/S1-R033) and the Telegram Bot
+#     API the operator enables (D65, S1-R038). A Lightning backend URL is
+#     supplied at runtime, never compiled in (D48).
 #     The pattern requires a host character after the scheme: a literal like
 #     startsWith("https://") is a security check, not an endpoint.
-check "no hardcoded outbound URLs except the update feed" \
-  bash -c "! grep -rnE 'https?://[A-Za-z0-9]' $MAIN $APP_MAIN --include='*.kt' --exclude='UpdateChecker.kt' && grep -q 'https://api.github.com/repos/' $APP_MAIN/update/UpdateChecker.kt"
+check "exactly two compiled outbound hosts, each in one file" \
+  bash -c "! grep -rnE 'https?://[A-Za-z0-9]' $MAIN $APP_MAIN --include='*.kt' --exclude='UpdateChecker.kt' --exclude='TelegramNotifier.kt' && grep -q 'https://api.github.com/repos/' $APP_MAIN/update/UpdateChecker.kt && grep -q 'https://api.telegram.org' $MAIN/notify/TelegramNotifier.kt && [ \$(grep -rl 'api\.telegram\.org' $MAIN --include='*.kt' | wc -l) -eq 1 ]"
 
 # 18. binding every interface requires an explicit acknowledgement (D41)
 check "public bind requires acknowledgement" \
@@ -140,7 +141,7 @@ check "nostr reference package opens no connection" \
 #     serialisation of the whole config (D53). A credential field appearing in
 #     either file is a leak, so the identifiers must be absent outright.
 check "status and export carry no credential fields" \
-  bash -c "! grep -rnE 'passwordHash|apiKeySealed|nsec1|PRIVATE KEY' $MAIN/superserver/SuperStatusDocument.kt $MAIN/superserver/ConfigExport.kt"
+  bash -c "! grep -rnE 'passwordHash|apiKeySealed|nsec1|PRIVATE KEY' $MAIN/superserver/SuperStatusDocument.kt $MAIN/superserver/ConfigExport.kt $MAIN/notify/NotifyStatus.kt"
 
 # 25. the engine declares its service privately, for embedded hosts (D55)
 check "engine service is not exported" \
@@ -151,10 +152,12 @@ check "server29 replaces the service with the gated export" \
   bash -c "grep -q 'tools:node=\"replace\"' $MANIFEST_SERVER && grep -q 'exported=\"true\"' $MANIFEST_SERVER"
 
 # 27. outbound client sockets exist only where a documented feature needs them:
-#     the loopback agent client, the operator's Lightning backend and the SSH
-#     bridge (D58). Server sockets are separate and covered by check 6.
-check "outbound client sockets confined to agent, lightning and ssh" \
-  bash -c "! grep -rnE '\bSocket\s*\(|HttpURLConnection|openConnection' $MAIN --include='*.kt' | grep -vE '/(agent|ssh)/|superserver/net/'"
+#     the loopback agent client, the operator's Lightning backend, the SSH bridge
+#     (D58) and the alert delivery (D65). Server sockets are separate and covered
+#     by check 6. A notifier reaches the network only through the shared
+#     transport seam, so it holds no socket symbol of its own.
+check "outbound client sockets confined to documented features" \
+  bash -c "! grep -rnE '\bSocket\s*\(|HttpURLConnection|openConnection' $MAIN --include='*.kt' | grep -vE '/(agent|ssh|notify)/|superserver/net/'"
 
 # 28. no private key material is committed; keys are generated on the device
 check "no committed private key material" \
@@ -175,6 +178,18 @@ check "project key/value ops are namespaced by the engine" \
 #     no NWC, no socket, and no outbound URL in that file.
 check "external node reference opens no connection" \
   bash -c "! grep -rnE 'Socket\s*\(|openConnection|HttpURLConnection|okhttp|java\.net\.URL|ManagedChannel|grpc' $MAIN/superserver/plugins/lightning/ExternalNodeRef.kt"
+
+# 32. notifications are bounded by construction (D66): no repeating task of any
+#     kind, a fixed queue and a fixed per-minute ceiling, and exactly one retry
+#     site so "two attempts" stays a fact rather than an intention.
+check "notification delivery has no scheduler and one retry site" \
+  bash -c "! grep -rnE 'ScheduledExecutorService|scheduleAtFixedRate|scheduleWithFixedDelay|Executors\.newScheduled|java\.util\.Timer' $MAIN/notify --include='*.kt' && grep -q 'MAX_QUEUE' $MAIN/notify/TelegramNotifier.kt && grep -q 'MAX_PER_MINUTE' $MAIN/notify/TelegramNotifier.kt && [ \$(grep -c 'if (!outcome.ok && outcome.retryable)' $MAIN/notify/TelegramNotifier.kt) -eq 1 ]"
+
+# 33. the bot token reaches the disk only through the Keystore box (D67), and
+#     the public projection never carries the token or the chat id — the chat id
+#     identifies the operator, so it is device state, not status.
+check "notification token is sealed and absent from the public projection" \
+  bash -c "grep -q 'secretBox\.seal(' $MAIN/notify/NotifySettingsStore.kt && grep -q 'secretBox\.open(' $MAIN/notify/NotifySettingsStore.kt && ! grep -q 'tokenSealed' $MAIN/notify/NotifyStatus.kt && ! grep -q 'chatId' $MAIN/notify/NotifyStatus.kt"
 
 echo
 TOTAL=$((PASS + FAIL))
