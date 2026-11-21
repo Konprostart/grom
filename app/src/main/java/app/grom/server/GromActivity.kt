@@ -29,6 +29,7 @@ import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
 import app.grom.server.referral.ReferralStore
 import app.grom.server.service.GromPrefs
+import app.grom.server.ssh.SshTarget
 import app.grom.server.store.AndroidKeystoreSecretBox
 import app.grom.server.superserver.ApiKeyConfig
 import app.grom.server.superserver.AuthMode
@@ -42,8 +43,11 @@ import app.grom.server.superserver.auth.PasswordHash
 import app.grom.server.superserver.nostr.Nip19
 import app.grom.server.superserver.nostr.RelayUrl
 import app.grom.server.superserver.nostr.RemoteBridgeHint
+import app.grom.server.superserver.plugins.lightning.ExternalNodeKind
+import app.grom.server.superserver.plugins.lightning.ExternalNodeRef
 import app.grom.server.ui.DashboardModel
 import app.grom.server.ui.GromTheme
+import app.grom.server.ui.HelpModel
 import app.grom.server.ui.Lamp
 import app.grom.server.ui.Palette
 import app.grom.server.ui.actionRow
@@ -120,6 +124,7 @@ class GromActivity : Activity() {
     private lateinit var superBridgeRow: Pair<LinearLayout, TextView>
     private lateinit var superCopyConfigRow: Pair<LinearLayout, TextView>
     private lateinit var lightningHealthRow: Pair<LinearLayout, TextView>
+    private lateinit var superExternalNodeRow: Pair<LinearLayout, TextView>
 
     private lateinit var sshList: LinearLayout
     private var sshAvailable = false
@@ -252,6 +257,14 @@ class GromActivity : Activity() {
         column.addView(
             sectionCard("invite", R.string.invite_label, defaultOpen = false) {
                 buildInviteSection(it)
+            }
+        )
+        // Last on the page and closed by default: the answer to "what is this?"
+        // should be available, not in the way (D62).
+        column.addView(gap(14))
+        column.addView(
+            sectionCard("help", R.string.ui_help, defaultOpen = false) {
+                buildHelpSection(it)
             }
         )
         column.addView(gap(24))
@@ -424,6 +437,23 @@ class GromActivity : Activity() {
 
     // ---------------------------------------------------------- section bodies
 
+    /**
+     * The plain-language explanation (D62). Every string lives in strings.xml,
+     * the order is fixed by [HelpModel], and nothing here reports state.
+     */
+    private fun buildHelpSection(body: LinearLayout) {
+        for ((index, block) in HelpModel.blocks().withIndex()) {
+            if (index > 0) body.addView(gap(14))
+            body.addView(
+                text(getString(block.headingRes), 14f, palette.onSurface, Typeface.BOLD)
+            )
+            body.addView(gap(4))
+            body.addView(text(getString(block.bodyRes), 12f, palette.muted))
+        }
+        body.addView(gap(14))
+        body.addView(text(getString(HelpModel.footnoteRes()), 11f, palette.muted))
+    }
+
     private fun buildRuntimeSection(body: LinearLayout) {
         runtimeTitle = text(getString(R.string.ui_dash), 20f, palette.onSurface, Typeface.BOLD)
         body.addView(runtimeTitle)
@@ -519,6 +549,11 @@ class GromActivity : Activity() {
             showLightningDialog()
         }
         body.addView(superLightningRow.first)
+        body.addView(divider(palette))
+        superExternalNodeRow = actionRowState(getString(R.string.access_external_node), palette) {
+            showExternalNodeDialog()
+        }
+        body.addView(superExternalNodeRow.first)
         body.addView(divider(palette))
         lightningHealthRow = actionRowState(getString(R.string.lightning_health), palette) {
             probeLightning()
@@ -747,6 +782,13 @@ class GromActivity : Activity() {
             ?.label
             ?.takeIf { it.isNotBlank() }
             ?: getString(R.string.access_bridge_none)
+        superExternalNodeRow.second.text = superConfig.lightning.externalNode
+            .takeUnless { it.isEmpty() }
+            ?.let { node ->
+                val kind = node.kind.wireName.uppercase()
+                if (node.label.isBlank()) kind else "$kind \u00b7 ${node.label}"
+            }
+            ?: getString(R.string.access_external_node_none)
         superCopyConfigRow.second.text = ""
 
         val health = superStatus?.get("lightningHealth") as? Map<*, *>
@@ -1142,6 +1184,86 @@ class GromActivity : Activity() {
             .show()
     }
 
+    /**
+     * A reference is not a connection (D63): Grom stores the kind, a label and a
+     * host hint, and never opens a gRPC, NWC or socket connection to the node.
+     */
+    private fun showExternalNodeDialog() {
+        val existing = superConfig.lightning.externalNode
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), 0)
+        }
+        val kindInput = EditText(this).apply {
+            hint = getString(R.string.dialog_external_node_kind)
+            setSingleLine()
+            setText(if (existing.kind == ExternalNodeKind.NONE) "" else existing.kind.wireName)
+        }
+        val labelInput = EditText(this).apply {
+            hint = getString(R.string.dialog_external_node_label)
+            setSingleLine()
+            setText(existing.label)
+        }
+        val endpointInput = EditText(this).apply {
+            hint = getString(R.string.dialog_external_node_endpoint)
+            setSingleLine()
+            setText(existing.endpointHint)
+        }
+        column.addView(kindInput)
+        column.addView(labelInput)
+        column.addView(endpointInput)
+        column.addView(
+            text(getString(R.string.dialog_external_node_note), 11f, palette.muted)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_external_node_title)
+            .setMessage(R.string.dialog_external_node_body)
+            .setView(column)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val kindText = kindInput.text.toString().trim()
+                val kind = if (kindText.isEmpty()) {
+                    ExternalNodeKind.NONE
+                } else {
+                    ExternalNodeKind.entries.firstOrNull { it.wireName == kindText.lowercase() }
+                }
+                if (kind == null) {
+                    toast(getString(R.string.toast_external_node_invalid))
+                    return@setPositiveButton
+                }
+                val node = ExternalNodeRef(
+                    kind = kind,
+                    label = labelInput.text.toString().trim(),
+                    endpointHint = endpointInput.text.toString().trim()
+                )
+                if (node.isEmpty()) {
+                    persistSuperConfig(
+                        superConfig.copy(
+                            lightning = superConfig.lightning.copy(externalNode = ExternalNodeRef())
+                        )
+                    )
+                    return@setPositiveButton
+                }
+                if (node.validate() != null) {
+                    toast(getString(R.string.toast_external_node_invalid))
+                    return@setPositiveButton
+                }
+                persistSuperConfig(
+                    superConfig.copy(
+                        lightning = superConfig.lightning.copy(externalNode = node)
+                    )
+                )
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                persistSuperConfig(
+                    superConfig.copy(
+                        lightning = superConfig.lightning.copy(externalNode = ExternalNodeRef())
+                    )
+                )
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
     private fun copyConfigToClipboard() {
         val superStatus = status?.get("super") as? Map<*, *>
         val lightningRaw = superStatus?.get("lightningHealth") as? Map<*, *>
@@ -1200,6 +1322,22 @@ class GromActivity : Activity() {
         for (target in sshTargets) {
             sshList.addView(sshRow(target))
             sshList.addView(divider(palette))
+        }
+        // Honest capacity note: saved servers are unlimited, live tunnels are
+        // not, because each one costs a thread, a socket and an SSH session.
+        if (sshTargets.size > SshTarget.ADVISORY_TARGETS) {
+            sshList.addView(
+                text(
+                    resources.getQuantityString(
+                        R.plurals.ssh_advisory,
+                        sshTargets.size,
+                        sshTargets.size,
+                        SshTarget.MAX_ACTIVE
+                    ),
+                    11f,
+                    palette.muted
+                )
+            )
         }
     }
 
@@ -1691,9 +1829,97 @@ class GromActivity : Activity() {
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             )
             projectsList.addView(row)
+
+            // Two honest actions. There is no Start/Stop here: the engine does
+            // not own the host app's lifecycle, so a button that claimed to
+            // control it would be a lie (D61).
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, dp(6))
+            }
+            actions.addView(
+                pill(
+                    value = getString(R.string.project_copy_details),
+                    textColor = palette.onSurface,
+                    fill = palette.background,
+                    rippleColor = palette.ripple,
+                    stroke = palette.border,
+                    onClick = { copyProjectDetails(project) }
+                )
+            )
+            actions.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
+            actions.addView(
+                pill(
+                    value = getString(R.string.project_remove),
+                    textColor = palette.negative,
+                    fill = palette.background,
+                    rippleColor = palette.ripple,
+                    stroke = palette.border,
+                    onClick = { confirmRemoveProject(project) }
+                )
+            )
+            projectsList.addView(actions)
         }
         projectsList.addView(gap(4))
         projectsList.addView(text(getString(R.string.project_embedded_note), 10f, palette.muted))
+        projectsList.addView(text(getString(R.string.project_actions_hint), 10f, palette.muted))
+    }
+
+    /** Copies the registration only: no key, no heartbeat timestamp, no host data. */
+    private fun copyProjectDetails(project: Map<*, *>) {
+        val details = buildString {
+            appendLine("id: ${project["id"]}")
+            appendLine("title: ${project["title"]}")
+            appendLine("version: ${project["version"]}")
+            appendLine("package: ${project["package"]}")
+            appendLine("capabilities: ${(project["capabilities"] as? List<*>)?.joinToString(",")}")
+            append("state: ${project["state"]}")
+        }
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        if (clipboard == null) {
+            toast(getString(R.string.toast_invite_copy_failed))
+            return
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("grom-project", details))
+        toast(getString(R.string.project_details_copied))
+    }
+
+    /**
+     * Removing a live project is only temporary: the host re-announces itself at
+     * its next heartbeat. The dialog says so instead of implying a revocation.
+     */
+    private fun confirmRemoveProject(project: Map<*, *>) {
+        val id = (project["id"] as? String).orEmpty()
+        val title = (project["title"] as? String) ?: id
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.project_remove_title, title))
+            .setMessage(R.string.project_remove_body)
+            .setPositiveButton(R.string.project_remove) { _, _ ->
+                val server = client.server
+                if (server == null) {
+                    toast(getString(R.string.toast_not_bound, getString(R.string.project_remove)))
+                    return@setPositiveButton
+                }
+                try {
+                    server.removeProject(id)
+                    toast(getString(R.string.project_removed))
+                    lastProjectsSignature = null
+                    handler.postDelayed({ refreshNow() }, 300)
+                } catch (failure: IllegalStateException) {
+                    toast(
+                        getString(
+                            R.string.toast_error,
+                            getString(R.string.project_remove),
+                            failure.message ?: failure.javaClass.simpleName
+                        )
+                    )
+                } catch (failure: android.os.RemoteException) {
+                    toast(getString(R.string.toast_server_gone, getString(R.string.project_remove)))
+                }
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
     }
 
     // --------------------------------------------------------------- behaviour

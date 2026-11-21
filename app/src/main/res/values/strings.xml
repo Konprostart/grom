@@ -275,4 +275,40 @@
     <string name="lightning_probing">Probing\u2026</string>
     <string name="lightning_probe_ok">Lightning backend reachable</string>
     <string name="lightning_probe_failed">Probe failed: %1$s</string>
+
+    <!-- How Grom works (D62). Static, plain language, in one place. -->
+    <string name="ui_help">How Grom works?</string>
+    <string name="help_what_heading">What Grom does</string>
+    <string name="help_what_body">Grom turns this phone into a small server. Apps that include it get their own place to store data and their own API routes \u2014 on the phone itself, with no account and no cloud.</string>
+    <string name="help_local_heading">Most people need no rented server</string>
+    <string name="help_local_body">If an app only has to work while the phone is with you, everything stays on the phone. Nothing to rent, nothing to configure, no monthly cost. The phone has to stay switched on and the app has to stay installed.</string>
+    <string name="help_remote_heading">When an external server helps</string>
+    <string name="help_remote_body">Some systems must run all the time, even while the phone is locked or charging. For those you can connect your own server: type its address, user name and a password or key, and the phone opens the tunnel itself. Grom forwards only its API port \u2014 never a shell, never your files. Extra servers are optional and always under your control.</string>
+    <string name="help_footnote">Grom never invents a connection: if the link is down, the lamp is red and the screen says so.</string>
+
+    <!-- External Lightning node reference (D63). Grom stores it; it never dials it. -->
+    <string name="access_external_node">External node</string>
+    <string name="access_external_node_none">not set</string>
+    <string name="dialog_external_node_title">External Lightning node</string>
+    <string name="dialog_external_node_body">A reference only. Grom stores where your node lives and never connects to it: LND, Core Lightning and NWC stay on your own server.</string>
+    <string name="dialog_external_node_kind">Kind: lnd, cln or nwc</string>
+    <string name="dialog_external_node_label">Label</string>
+    <string name="dialog_external_node_endpoint">Endpoint (host or host:port)</string>
+    <string name="dialog_external_node_note">The endpoint stays on this phone. Status and Copy config carry the kind and label only.</string>
+    <string name="toast_external_node_invalid">That reference is too long or looks like a secret</string>
+
+    <!-- Project actions (D61). No Start/Stop: the engine does not own the host. -->
+    <string name="project_copy_details">Copy details</string>
+    <string name="project_remove">Remove now</string>
+    <string name="project_remove_title">Remove %1$s?</string>
+    <string name="project_remove_body">The registration is cleared. A running app announces itself again at its next heartbeat, within about 30 seconds.</string>
+    <string name="project_removed">Registration removed; a running app re-registers on its next heartbeat</string>
+    <string name="project_details_copied">Project details copied</string>
+    <string name="project_actions_hint">Remove now clears the entry; a running app re-registers within 30 seconds.</string>
+
+    <!-- Saved servers are unlimited; live tunnels are not (D64). -->
+    <plurals name="ssh_advisory">
+        <item quantity="one">%1$d server saved. At most %2$d can be connected at once; the rest stay idle until you connect them.</item>
+        <item quantity="other">%1$d servers saved. At most %2$d can be connected at once; the rest stay idle until you connect them.</item>
+    </plurals>
 </resources>

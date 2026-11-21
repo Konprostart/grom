@@ -28,9 +28,17 @@ class DashboardModelTest {
             "bridge" to mapOf(
                 "configured" to bridgeConfigured,
                 "connected" to bridgeConnected,
-                "active" to if (bridgeConnected) 1 else 0
+                "active" to if (bridgeConnected) 1 else 0,
+                "tunnels" to listOf(
+                    mapOf(
+                        "id" to "0123456789abcdef",
+                        "label" to "Mostro VPS",
+                        "state" to if (bridgeConnected) "connected" else "disconnected"
+                    )
+                )
             ),
-            "remoteBridge" to mapOf("label" to "Mostro VPS")
+            // Configuration written by the operator, never evidence of liveness.
+            "remoteBridge" to mapOf("label" to "Configured VPS hint")
         ),
         "projects" to projects
     )
@@ -102,6 +110,31 @@ class DashboardModelTest {
     @Test
     fun `bridge label is shown when connected`() {
         assertEquals("Mostro VPS", row(DashboardModel.build(status()), "bridge").value)
+    }
+
+    @Test
+    fun `the configured bridge hint never supplies the serving label`() {
+        // The hint says "Configured VPS hint"; only the measured tunnel label
+        // may appear, so a configured-but-down bridge shows no hint at all.
+        val down = DashboardModel.build(status(bridgeConnected = false))
+        assertEquals("not connected", row(down, "bridge").value)
+        assertEquals(Lamp.OFF, row(down, "bridge").lamp)
+    }
+
+    @Test
+    fun `the serving row counts more than one alive project`() {
+        val many = DashboardModel.build(
+            status(
+                projects = listOf(
+                    mapOf("id" to "my-wallet", "title" to "My Wallet", "state" to "alive"),
+                    mapOf("id" to "chat", "title" to "Chat", "state" to "alive"),
+                    mapOf("id" to "old", "title" to "Old", "state" to "stale")
+                )
+            )
+        )
+        // The model renders the list it is given, so the first entry is shown.
+        assertEquals("My Wallet +1", row(many, "project").value)
+        assertEquals(Lamp.ON, row(many, "project").lamp)
     }
 
     @Test

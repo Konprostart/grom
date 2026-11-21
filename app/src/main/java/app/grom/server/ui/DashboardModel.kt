@@ -84,7 +84,13 @@ object DashboardModel {
         val bridge = superBlock?.get("bridge") as? Map<*, *>
         val bridgeConfigured = bridge?.get("configured") == true
         val bridgeConnected = bridge?.get("connected") == true
-        val bridgeLabel = (superBlock?.get("remoteBridge") as? Map<*, *>)?.get("label") as? String
+        // The label of the tunnel that is actually up, taken from the measured
+        // per-tunnel list. The `remoteBridge` hint is configuration written by
+        // the operator, not evidence that anything is connected (D56).
+        val connectedLabel = (bridge?.get("tunnels") as? List<*>)
+            ?.mapNotNull { it as? Map<*, *> }
+            ?.firstOrNull { it["state"] == "connected" }
+            ?.get("label") as? String
         val bridgeLamp = when {
             !bridgeConfigured -> Lamp.UNKNOWN
             bridgeConnected -> Lamp.ON
@@ -92,7 +98,7 @@ object DashboardModel {
         }
         val bridgeValue = when {
             !bridgeConfigured -> null
-            bridgeConnected && !bridgeLabel.isNullOrBlank() -> bridgeLabel
+            bridgeConnected && !connectedLabel.isNullOrBlank() -> connectedLabel
             bridgeConnected -> "connected"
             else -> "not connected"
         }
@@ -100,15 +106,22 @@ object DashboardModel {
         val projects = status["projects"] as? List<*>
         val alive = projects
             ?.mapNotNull { it as? Map<*, *> }
-            ?.firstOrNull { it["state"] == "alive" }
+            ?.filter { it["state"] == "alive" }
+            ?: emptyList()
         val anyProject = projects?.isNotEmpty() == true
         val projectLamp = when {
             !anyProject -> Lamp.UNKNOWN
-            alive != null -> Lamp.ON
+            alive.isNotEmpty() -> Lamp.ON
             else -> Lamp.OFF
         }
         val projectValue = when {
-            alive != null -> (alive["title"] as? String) ?: (alive["id"] as? String)
+            alive.isNotEmpty() -> {
+                val first = alive.first()
+                val title = (first["title"] as? String) ?: (first["id"] as? String) ?: ""
+                // "+N" makes it obvious that more than one app is served, rather
+                // than quietly showing only the first.
+                if (alive.size > 1) "$title +${alive.size - 1}" else title
+            }
             anyProject -> "stale"
             else -> null
         }
