@@ -4,11 +4,16 @@ package app.grom.server
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -19,6 +24,7 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -50,6 +56,8 @@ import app.grom.server.ui.DashboardModel
 import app.grom.server.ui.GromTheme
 import app.grom.server.ui.HelpModel
 import app.grom.server.ui.Lamp
+import app.grom.server.ui.MenuEntry
+import app.grom.server.ui.MenuModel
 import app.grom.server.ui.NotifyModel
 import app.grom.server.ui.Palette
 import app.grom.server.ui.actionRow
@@ -106,6 +114,13 @@ class GromActivity : Activity() {
 
     private val sectionBodies = LinkedHashMap<String, LinearLayout>()
     private val sectionChevrons = LinkedHashMap<String, TextView>()
+
+    /**
+     * Menu sections, built once and kept detached (D68). A section is
+     * reparented into a dialog when it is opened, so every renderer below keeps
+     * a live view and a section can never show stale or uninitialised content.
+     */
+    private val sectionPanels = LinkedHashMap<String, LinearLayout>()
 
     private lateinit var runtimeTitle: TextView
     private lateinit var runtimeDetail: TextView
@@ -226,65 +241,32 @@ class GromActivity : Activity() {
         column.addView(header())
         column.addView(gap(20))
         column.addView(heroCard())
-        column.addView(gap(14))
-        column.addView(servingCard())
 
+        // Only the server role serves anything: peripheral26 never binds a
+        // socket, so an all-grey "Now serving" card would be noise, not status.
         if (BuildConfig.GROMSERVER) {
             column.addView(gap(14))
-            column.addView(
-                sectionCard("runtime", R.string.ui_runtime_section, defaultOpen = false) {
-                    buildRuntimeSection(it)
-                }
-            )
-            column.addView(gap(14))
-            column.addView(
-                sectionCard("ssh", R.string.ui_external, defaultOpen = false) {
-                    buildSshSection(it)
-                }
-            )
-            column.addView(gap(14))
-            column.addView(
-                sectionCard("nostr", R.string.ui_nostr_lightning, defaultOpen = false) {
-                    buildNostrSection(it)
-                }
-            )
-            column.addView(gap(14))
-            column.addView(
-                sectionCard("projects", R.string.ui_projects, defaultOpen = false) {
-                    buildProjectsSection(it)
-                }
-            )
-            column.addView(gap(14))
-            column.addView(
-                sectionCard("alerts", R.string.ui_alerts, defaultOpen = false) {
-                    buildAlertsSection(it)
-                }
-            )
-            column.addView(gap(14))
-            column.addView(
-                sectionCard("access", R.string.ui_public_access, defaultOpen = false) {
-                    buildAccessSection(it)
-                }
-            )
+            column.addView(servingCard())
         }
 
-        column.addView(gap(14))
-        column.addView(
-            sectionCard("update", R.string.ui_update, defaultOpen = true) {
-                buildUpdateSection(it)
-            }
-        )
+        // Everything else lives in the header menu (D68). The panels are built
+        // here, detached, so every renderer below keeps a live view from the
+        // first refresh and an opened section is never stale.
+        buildSectionPanels()
+
+        // Bottom of the page: the invite code, then the explanation immediately
+        // after it, exactly where an operator looks for "what is this?" (D62).
         column.addView(gap(14))
         column.addView(
             sectionCard("invite", R.string.invite_label, defaultOpen = false) {
                 buildInviteSection(it)
             }
         )
-        // Last on the page and closed by default: the answer to "what is this?"
-        // should be available, not in the way (D62).
+        // Open on first run: the explanation is the point of the section, and it
+        // sits below everything else so it never pushes the dashboard down.
         column.addView(gap(14))
         column.addView(
-            sectionCard("help", R.string.ui_help, defaultOpen = false) {
+            sectionCard("help", R.string.ui_help, defaultOpen = true) {
                 buildHelpSection(it)
             }
         )
@@ -342,6 +324,21 @@ class GromActivity : Activity() {
             titles,
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         )
+
+        // Menu sits next to the theme switch in the top-right corner (D68).
+        val menuAction = pill(
+            value = getString(R.string.ui_menu),
+            textColor = palette.onSurface,
+            fill = palette.background,
+            rippleColor = palette.ripple,
+            stroke = palette.border,
+            onClick = { showMenu() }
+        ).apply {
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+        }
+        row.addView(menuAction)
+        row.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
 
         val themeAction = pill(
             value = GromTheme.mode(this).label,
@@ -454,6 +451,174 @@ class GromActivity : Activity() {
         body.visibility = if (open) View.VISIBLE else View.GONE
         sectionChevrons[key]?.text = if (open) "\u25BE" else "\u25B8"
         GromPrefs.setSectionOpen(this, key, open)
+    }
+
+    // ------------------------------------------------------- menu (D68)
+
+    /**
+     * Builds every menu section once, detached from the page. Building eagerly
+     * costs the same as before this change (the cards were always built) and
+     * keeps `render*` pointing at real views, which is why opening a section is
+     * instant and never shows a placeholder.
+     */
+    private fun buildSectionPanels() {
+        panel(MenuModel.KEY_UPDATE) { buildUpdateSection(it) }
+        if (!BuildConfig.GROMSERVER) return
+        panel(MenuModel.KEY_RUNTIME) { buildRuntimeSection(it) }
+        panel(MenuModel.KEY_SSH) { buildSshSection(it) }
+        panel(MenuModel.KEY_NOSTR) { buildNostrSection(it) }
+        panel(MenuModel.KEY_PROJECTS) { buildProjectsSection(it) }
+        panel(MenuModel.KEY_ALERTS) { buildAlertsSection(it) }
+        panel(MenuModel.KEY_ACCESS) { buildAccessSection(it) }
+    }
+
+    private fun panel(key: String, build: (LinearLayout) -> Unit) {
+        val cardView = card(palette)
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        cardView.addView(body)
+        build(body)
+        sectionPanels[key] = cardView
+    }
+
+    /** The dropdown behind the header button: sections, in importance order. */
+    private fun showMenu() {
+        val entries = MenuModel.entries(BuildConfig.GROMSERVER)
+        val dialog = Dialog(this)
+
+        val cardView = card(palette, radiusDp = 22).apply {
+            setPadding(dp(10), dp(16), dp(10), dp(10))
+        }
+        cardView.addView(
+            label(getString(R.string.ui_menu_sections), palette).apply {
+                setPadding(dp(10), 0, dp(10), dp(6))
+            }
+        )
+        for (entry in entries) {
+            cardView.addView(
+                menuRow(entry) {
+                    dialog.dismiss()
+                    showSection(entry.key)
+                }
+            )
+        }
+        cardView.addView(gap(6))
+        cardView.addView(
+            pill(
+                value = getString(R.string.ui_close),
+                textColor = palette.onSurface,
+                fill = palette.background,
+                rippleColor = palette.ripple,
+                stroke = palette.border,
+                onClick = { dialog.dismiss() }
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+        )
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(24), dp(20), dp(24))
+        }
+        root.addView(cardView)
+        dialog.setContentView(root)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+    }
+
+    /** Title plus one short line, with the same ripple and chevron as a row. */
+    private fun menuRow(entry: MenuEntry, onClick: () -> Unit): View {
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(text(getString(entry.titleRes), 15f, palette.onSurface))
+            addView(gap(2))
+            addView(text(getString(entry.subtitleRes), 11f, palette.muted))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(12), dp(10), dp(12))
+            isClickable = true
+            isFocusable = true
+            background = RippleDrawable(ColorStateList.valueOf(palette.ripple), null, null)
+            setOnClickListener { onClick() }
+            addView(
+                titles,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            addView(text("\u203A", 20f, palette.muted, gravity = Gravity.END))
+        }
+    }
+
+    /**
+     * Opens one section in a dialog. The panel is moved out of any previous
+     * parent first, and moved back out on dismiss, so a section can be opened
+     * as many times as the operator likes without being rebuilt or duplicated.
+     */
+    private fun showSection(key: String) {
+        val titleRes = MenuModel.titleFor(key) ?: return
+        val panel = sectionPanels[key] ?: return
+        (panel.parent as? ViewGroup)?.removeView(panel)
+
+        val dialog = Dialog(this)
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val inner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        inner.addView(panel)
+        scroll.addView(inner)
+
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), 0, dp(6), dp(6))
+        }
+        headerRow.addView(
+            label(getString(titleRes), palette),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        headerRow.addView(
+            pill(
+                value = getString(R.string.ui_close),
+                textColor = palette.onSurface,
+                fill = palette.background,
+                rippleColor = palette.ripple,
+                stroke = palette.border,
+                onClick = { dialog.dismiss() }
+            ).apply {
+                setPadding(dp(14), dp(6), dp(14), dp(6))
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            }
+        )
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(28), dp(16), dp(28))
+        }
+        root.addView(headerRow)
+        root.addView(
+            scroll,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+        dialog.setContentView(root)
+        dialog.setOnDismissListener {
+            (panel.parent as? ViewGroup)?.removeView(panel)
+        }
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        val height = (resources.displayMetrics.heightPixels * 0.86f).toInt()
+        dialog.window?.setLayout(WindowManager.LayoutParams.MATCH_PARENT, height)
+        // Paint the freshly opened section from the last status immediately
+        // instead of waiting up to a second for the refresher tick.
+        render()
     }
 
     // ---------------------------------------------------------- section bodies

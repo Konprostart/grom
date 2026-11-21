@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: Apache-2.0
+package app.grom.server.ui
+
+import app.grom.server.R
+
+/**
+ * The navigation menu (D68).
+ *
+ * The dashboard keeps only what an operator must see without tapping: the
+ * server state, Start/Stop and the four "Now serving" lamps. Every other
+ * section is still built and still live, but it opens from the menu in the
+ * header instead of pushing the important things down the page.
+ *
+ * The order here is the order on screen and it is a product decision, not a
+ * refactor: the things that cost money or break silently (a tunnel, a backend,
+ * the apps that are actually served) come first; maintenance and updates come
+ * last. `peripheral26` never binds a socket, so it only ever gets the update
+ * entry — promising sections it does not have would be the same kind of lie
+ * the "How Grom works" text exists to avoid (D62).
+ *
+ * Pure Kotlin, no `android.*`, no state: [MenuModelTest] can assert the order,
+ * the keys and that every entry points at a real string (D30).
+ */
+data class MenuEntry(
+    /** Stable key shared with the activity's section builders. */
+    val key: String,
+    val titleRes: Int,
+    /** One short line saying what the section is for. */
+    val subtitleRes: Int
+)
+
+object MenuModel {
+
+    const val KEY_SSH: String = "ssh"
+    const val KEY_NOSTR: String = "nostr"
+    const val KEY_PROJECTS: String = "projects"
+    const val KEY_ALERTS: String = "alerts"
+    const val KEY_ACCESS: String = "access"
+    const val KEY_RUNTIME: String = "runtime"
+    const val KEY_UPDATE: String = "update"
+
+    /**
+     * Ordered by what breaks first if it is ignored: the link to the outside,
+     * the chain settings other software reads, the apps being served, the
+     * alerts, the public surface, supervision, then updates.
+     */
+    fun entries(serverRole: Boolean): List<MenuEntry> {
+        if (!serverRole) {
+            return listOf(
+                MenuEntry(KEY_UPDATE, R.string.ui_update, R.string.menu_update_sub)
+            )
+        }
+        return listOf(
+            MenuEntry(KEY_SSH, R.string.ui_external, R.string.menu_ssh_sub),
+            MenuEntry(KEY_NOSTR, R.string.ui_nostr_lightning, R.string.menu_nostr_sub),
+            MenuEntry(KEY_PROJECTS, R.string.ui_projects, R.string.menu_projects_sub),
+            MenuEntry(KEY_ALERTS, R.string.ui_alerts, R.string.menu_alerts_sub),
+            MenuEntry(KEY_ACCESS, R.string.ui_public_access, R.string.menu_access_sub),
+            MenuEntry(KEY_RUNTIME, R.string.ui_runtime_section, R.string.menu_runtime_sub),
+            MenuEntry(KEY_UPDATE, R.string.ui_update, R.string.menu_update_sub)
+        )
+    }
+
+    /**
+     * The dialog title for a key. Deliberately independent of the role: the
+     * lookup answers "what is this key called", not "may this build show it".
+     */
+    fun titleFor(key: String): Int? = when (key) {
+        KEY_SSH -> R.string.ui_external
+        KEY_NOSTR -> R.string.ui_nostr_lightning
+        KEY_PROJECTS -> R.string.ui_projects
+        KEY_ALERTS -> R.string.ui_alerts
+        KEY_ACCESS -> R.string.ui_public_access
+        KEY_RUNTIME -> R.string.ui_runtime_section
+        KEY_UPDATE -> R.string.ui_update
+        else -> null
+    }
+}

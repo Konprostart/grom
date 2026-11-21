@@ -11,7 +11,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * The "How Grom works" content (D62).
+ * The "How Grom works" content (D62, extended by D68).
  *
  * The section is static on purpose: it may explain what Grom is, but it must
  * never imply that anything is currently running, and it must not smuggle in an
@@ -20,30 +20,54 @@ import java.io.File
 class HelpModelTest {
 
     @Test
-    fun `the server role has four blocks, in a fixed order`() {
+    fun `the server role has seven blocks, in a fixed order`() {
         // Adding a block is a product decision, not a refactor: this fails so
-        // the reviewer sees it. The fourth one is the alert explanation (D65).
+        // the reviewer sees it. D68 added Nostr/Lightning, local projects and
+        // the honest-limit block around the three original ones (D65).
         val blocks = HelpModel.blocks(serverRole = true)
-        assertEquals(4, blocks.size)
-        assertEquals(4, blocks.map { it.headingRes }.toSet().size)
-        assertEquals(4, blocks.map { it.bodyRes }.toSet().size)
-        assertEquals(R.string.help_alerts_heading, blocks.last().headingRes)
+        assertEquals(7, blocks.size)
+        assertEquals(7, blocks.map { it.headingRes }.toSet().size)
+        assertEquals(7, blocks.map { it.bodyRes }.toSet().size)
+        assertEquals(R.string.help_what_heading, blocks.first().headingRes)
+        assertEquals(R.string.help_limits_heading, blocks.last().headingRes)
     }
 
     @Test
-    fun `a role without alerts explains only what it has`() {
-        // peripheral26 neither serves nor notifies: promising the section there
-        // would be the exact kind of untruth this text exists to avoid.
+    fun `every feature the dashboard offers is explained exactly once`() {
+        val headings = HelpModel.blocks(serverRole = true).map { it.headingRes }
+        listOf(
+            R.string.help_what_heading,
+            R.string.help_local_heading,
+            R.string.help_remote_heading,
+            R.string.help_nostr_heading,
+            R.string.help_projects_heading,
+            R.string.help_alerts_heading,
+            R.string.help_limits_heading
+        ).forEach { heading ->
+            assertEquals("$heading must appear once", 1, headings.count { it == heading })
+        }
+    }
+
+    @Test
+    fun `a role without a server promises only what it has`() {
+        // peripheral26 neither serves, nor tunnels, nor notifies: promising the
+        // section there would be the exact kind of untruth this text exists to
+        // avoid. It keeps "what Grom does" and "what it cannot do".
         val blocks = HelpModel.blocks(serverRole = false)
-        assertEquals(3, blocks.size)
-        assertEquals(R.string.help_remote_heading, blocks.last().headingRes)
+        assertEquals(2, blocks.size)
+        assertEquals(R.string.help_what_heading, blocks.first().headingRes)
+        assertEquals(R.string.help_limits_heading, blocks.last().headingRes)
     }
 
     @Test
-    fun `the roles share the first three blocks in the same order`() {
+    fun `the roles agree on what Grom is and what it cannot do`() {
         assertEquals(
-            HelpModel.blocks(serverRole = false),
-            HelpModel.blocks(serverRole = true).take(3)
+            HelpModel.blocks(serverRole = false).first(),
+            HelpModel.blocks(serverRole = true).first()
+        )
+        assertEquals(
+            HelpModel.blocks(serverRole = false).last(),
+            HelpModel.blocks(serverRole = true).last()
         )
     }
 
@@ -72,7 +96,10 @@ class HelpModelTest {
             "help_what_heading", "help_what_body",
             "help_local_heading", "help_local_body",
             "help_remote_heading", "help_remote_body",
+            "help_nostr_heading", "help_nostr_body",
+            "help_projects_heading", "help_projects_body",
             "help_alerts_heading", "help_alerts_body",
+            "help_limits_heading", "help_limits_body",
             "help_footnote"
         ).forEach { name ->
             assertTrue("missing string: $name", names.contains(name))

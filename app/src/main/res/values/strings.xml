@@ -207,6 +207,18 @@
     <string name="ui_projects">Local projects</string>
     <string name="ui_public_access">Public access</string>
 
+    <!-- Header menu (D68). The dashboard stays quiet; these open on demand. -->
+    <string name="ui_menu">Menu</string>
+    <string name="ui_menu_sections">Sections</string>
+    <string name="ui_close">Close</string>
+    <string name="menu_ssh_sub">Your own VPS, used as a booster</string>
+    <string name="menu_nostr_sub">npub, relays and Lightning</string>
+    <string name="menu_projects_sub">Apps registered on this phone</string>
+    <string name="menu_alerts_sub">Bot token, chat id, test message</string>
+    <string name="menu_access_sub">Bind, authentication and API keys</string>
+    <string name="menu_runtime_sub">Agent, quarantine, token, start on boot</string>
+    <string name="menu_update_sub">Check for a newer APK</string>
+
     <!-- External SSH servers (D58). -->
     <string name="ssh_add">Add server</string>
     <string name="ssh_none">No external servers saved</string>
@@ -284,6 +296,12 @@
     <string name="help_local_body">If an app only has to work while the phone is with you, everything stays on the phone. Nothing to rent, nothing to configure, no monthly cost. The phone has to stay switched on and the app has to stay installed.</string>
     <string name="help_remote_heading">When an external server helps</string>
     <string name="help_remote_body">Some systems must run all the time, even while the phone is locked or charging. For those you can connect your own server: type its address, user name and a password or key, and the phone opens the tunnel itself. Grom forwards only its API port \u2014 never a shell, never your files. Extra servers are optional and always under your control.</string>
+    <string name="help_nostr_heading">Nostr and Lightning</string>
+    <string name="help_nostr_body">Grom can hold your public Nostr key and a list of relays so your other software can read them from one place. It does not open relay connections itself: adding a relay is only a note to yourself. For Lightning you either point Grom at your own backend or keep a reference to a node that runs elsewhere; the probe in the menu is the only thing that checks it, and until it has run the answer is honestly \u201cnot probed\u201d.</string>
+    <string name="help_projects_heading">Local projects</string>
+    <string name="help_projects_body">Every app that includes Grom says hello here and keeps saying it while it runs. The lamp is green while that app is alive and grey when it has not checked in for a while. Each app only sees its own storage. Removing an entry does not stop the app: a running app announces itself again within about half a minute.</string>
+    <string name="help_limits_heading">What Grom cannot do</string>
+    <string name="help_limits_body">If the phone is off, has no network, or Android stops the app, nothing is served and no alert is sent \u2014 nothing else is watching. A red lamp means a measured failure; a grey one means nothing has been checked yet. There is no uptime promise and no silent retry that pretends to work.</string>
     <string name="help_footnote">Grom never invents a connection: if the link is down, the lamp is red and the screen says so.</string>
 
     <!-- External Lightning node reference (D63). Grom stores it; it never dials it. -->
