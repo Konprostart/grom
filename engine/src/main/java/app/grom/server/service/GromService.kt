@@ -72,6 +72,10 @@ class GromService : Service() {
 
     override fun onDestroy() {
         runtime.stop()
+        // "Server stopped" is the one message that must beat process death: the
+        // supervisor records it, the worker flushes here, and the wait is
+        // bounded so Android's destroy window is respected (D66).
+        runtime.flushNotifications(NOTIFY_FLUSH_MS)
         super.onDestroy()
     }
 
@@ -217,6 +221,27 @@ class GromService : Service() {
             requireSameSigner()
             return runtime.lightningProbeJson()
         }
+
+        // -------------------------------------------------- API 5 (D65-D67)
+
+        override fun notifySettingsJson(): String {
+            requireSameSigner()
+            return runtime.notifySettingsJson()
+        }
+
+        override fun notifySaveSettings(json: String?): String {
+            requireSameSigner()
+            return try {
+                runtime.notifySaveSettingsJson(json.orEmpty())
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
+        override fun notifyTestJson(): String {
+            requireSameSigner()
+            return runtime.notifyTestJson()
+        }
     }
 
     /**
@@ -283,5 +308,6 @@ class GromService : Service() {
         private const val TAG = "GromService"
         private const val CHANNEL_ID = "grom-server"
         private const val NOTIFICATION_ID = 47001
+        private const val NOTIFY_FLUSH_MS = 2_500L
     }
 }

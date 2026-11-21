@@ -13,6 +13,7 @@ package app.grom.sdk.ipc;
  * surface (D55): project registration, the sanitised config export, a direct
  * agent exec, and the operator's SSH bridge (D58). API 4 adds project-scoped
  * key/value access (D61), so an embedded project can only reach its own keys.
+ * API 5 adds the operator's notification settings and a test send (D65).
  * Every new method goes through the same per-transaction signature gate as the
  * older ones.
  */
@@ -104,4 +105,24 @@ interface IGromServer {
      * dashboard's Lightning lamp can become green (D52).
      */
     String lightningProbeJson();
+
+    // ------------------------------------------------------- API 5 (D65-D67)
+
+    /**
+     * `{"enabled":…,"chatId":…,"tokenSet":…,"lastDelivery":{…}}`. The bot token
+     * itself is never returned by any method, only whether one is stored.
+     */
+    String notifySettingsJson();
+
+    /**
+     * Accepts `{enabled, chatId, token?, clearToken?}`. A null token keeps the
+     * stored one; the new one is sealed before it reaches the disk.
+     */
+    String notifySaveSettings(String json);
+
+    /**
+     * Sends one message now and reports `{"ok":…,"code":…}`. `ok` is true only
+     * when the provider answered `{"ok":true}`.
+     */
+    String notifyTestJson();
 }

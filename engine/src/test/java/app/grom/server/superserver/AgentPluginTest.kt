@@ -32,6 +32,27 @@ class AgentPluginTest {
     }
 
     @Test
+    fun statusCarriesTheHostBlocksWhileHealthStaysPure() {
+        // The notification block (D65) rides the same statusExtra callback as
+        // the reference config (D52), so `status` sees it and `health` does not.
+        val notifications = mapOf(
+            "enabled" to true,
+            "configured" to true,
+            "lastDelivery" to mapOf("ok" to true, "atMs" to 5L)
+        )
+        val plugin = plugin(statusExtra = { mapOf("notifications" to notifications) }) { _, _ ->
+            HttpResponse(500, "{}")
+        }
+
+        val status = plugin.status()
+        assertEquals(notifications, status["notifications"])
+
+        val healthResult = plugin.rpc("health", emptyMap())
+        assertTrue(healthResult is PluginResult.Ok)
+        assertFalse((healthResult as PluginResult.Ok).payload.containsKey("notifications"))
+    }
+
+    @Test
     fun relaysTheOpAndReturnsTheAgentEnvelope() {
         var seenOp: String? = null
         var seenBody: String? = null

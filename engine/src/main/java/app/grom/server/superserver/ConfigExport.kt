@@ -26,7 +26,8 @@ object ConfigExport {
         config: SuperServerConfig,
         lightning: Map<String, Any?>,
         projects: List<Map<String, Any?>> = emptyList(),
-        bridge: Map<String, Any?> = emptyMap()
+        bridge: Map<String, Any?> = emptyMap(),
+        notifications: Map<String, Any?> = emptyMap()
     ): String = Json.encode(
         linkedMapOf(
             "source" to SOURCE,
@@ -57,6 +58,19 @@ object ConfigExport {
                     "state" to (project["state"] as? String)
                 )
             },
+            // Enabled, configured and the measured last delivery only: the chat
+            // id would identify the operator and the token is a credential
+            // (D67). The external bridge has no business knowing either.
+            "notifications" to linkedMapOf(
+                "enabled" to (notifications["enabled"] == true),
+                "configured" to (notifications["configured"] == true),
+                "lastDelivery" to linkedMapOf(
+                    "ok" to ((notifications["lastDelivery"] as? Map<*, *>)
+                        ?.get("ok") as? Boolean),
+                    "atMs" to (((notifications["lastDelivery"] as? Map<*, *>)
+                        ?.get("atMs") as? Number)?.toLong() ?: 0L)
+                )
+            ),
             "dataPlane" to linkedMapOf(
                 "enabled" to config.enabled,
                 "bind" to config.bind.name,

@@ -102,6 +102,43 @@ class SuperServerIntegrationTest {
     }
 
     @Test
+    fun theStatusCarriesNotificationsWhileHealthDoesNot() {
+        val harness = start(
+            serverStatus = {
+                mapOf(
+                    "address" to "not bound",
+                    "notifications" to mapOf(
+                        "enabled" to true,
+                        "configured" to true,
+                        "lastDelivery" to mapOf("ok" to true, "atMs" to 7L)
+                    )
+                )
+            }
+        )
+        val health = harness.request("GET", "/v1/health")
+        assertEquals(200, health.status)
+        assertFalse(
+            "the unauthenticated health document must not carry alert state",
+            health.body.contains("notifications")
+        )
+
+        val login = harness.request(
+            "POST", "/v1/auth/login",
+            body = """{"password":"${harness.password}"}"""
+        )
+        val token = login.json()["token"] as String
+        val status = harness.request(
+            "GET", "/v1/status",
+            mapOf("Authorization" to "Bearer $token")
+        )
+        assertEquals(200, status.status)
+        val block = status.json()["notifications"] as Map<*, *>
+        assertEquals(true, block["enabled"])
+        assertEquals(true, block["configured"])
+        assertFalse("a chat id must never reach the data plane", status.body.contains("chatId"))
+    }
+
+    @Test
     fun wrongPasswordIsRejectedWithoutDistinguishing() {
         val harness = start()
         val response = harness.request("POST", "/v1/auth/login", body = """{"password":"wrong-password"}""")

@@ -9,13 +9,14 @@ import org.junit.Test
  * The constants an outside client compiles against (S4-R012, S4-R020).
  *
  * The API version is bumped whenever a method is added, so a client that was
- * built for API 3 knows to check before calling an API 4 method (projectExec).
+ * built for API 4 knows to check before calling an API 5 method (the Telegram
+ * alert settings, D65).
  */
 class GromClientContractTest {
 
     @Test
-    fun `api version is 4`() {
-        assertEquals(4, GromClient.API_VERSION)
+    fun `api version is 5`() {
+        assertEquals(5, GromClient.API_VERSION)
     }
 
     @Test

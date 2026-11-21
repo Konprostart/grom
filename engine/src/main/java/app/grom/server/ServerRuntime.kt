@@ -20,6 +20,9 @@ import app.grom.server.http.GromApi
 import app.grom.server.http.HttpResponse
 import app.grom.server.http.LoopbackHttpServer
 import app.grom.server.http.Router
+import app.grom.server.notify.NotifyDraft
+import app.grom.server.notify.NotifySettingsStore
+import app.grom.server.notify.TelegramNotifier
 import app.grom.server.projects.ProjectNamespace
 import app.grom.server.projects.ProjectRegistry
 import app.grom.server.service.GromPrefs
@@ -77,6 +80,16 @@ class ServerRuntime(
         logger = { line -> log(line) },
         localTarget = { localDataPlane() }
     )
+    /**
+     * The operator's own alerts (D65-D67). Settings live beside every other
+     * store; the notifier owns one daemon worker and never blocks the audit path.
+     */
+    private val notifyStore =
+        NotifySettingsStore(File(rootDir, NotifySettingsStore.FILE_NAME), secretBox)
+    private val notifier = TelegramNotifier(
+        store = notifyStore,
+        logger = { line -> log(line) }
+    )
     private val auditStore = AuditStore(File(rootDir, "audit"))
     private val policy = SupervisorPolicy()
     private val agentClient = AgentClient()
@@ -127,7 +140,8 @@ class ServerRuntime(
             audit = { action, detail -> safeAudit(action, detail) },
             logger = { line -> log(line) },
             projects = { projectRegistry.summary() },
-            bridge = { sshTunnels.statusForServer() }
+            bridge = { sshTunnels.statusForServer() },
+            notifications = { notifier.publicStatus() }
         )
     }
 
@@ -243,6 +257,9 @@ class ServerRuntime(
                 "agentPort" to agentPort,
                 "lastError" to lastError,
                 "projects" to projectRegistry.summary(),
+                // Sanitised: enabled, configured and the measured last delivery
+                // (D67). The chat id and the token stay on the device.
+                "notifications" to notifier.publicStatus(),
                 "super" to superServer.status()
             )
         }
@@ -461,7 +478,8 @@ class ServerRuntime(
             config = superServer.currentConfig(),
             lightning = lightning,
             projects = projectRegistry.summary(),
-            bridge = sshTunnels.statusForServer()
+            bridge = sshTunnels.statusForServer(),
+            notifications = notifier.publicStatus()
         )
     }
 
@@ -588,6 +606,58 @@ class ServerRuntime(
         sshTunnels.disconnect(id)
     }
 
+    // -------------------------------------------------- Notifications (D65)
+
+    /**
+     * The settings as the operator sees them over the Binder: the switch, the
+     * chat id and whether a token is set. The token itself is never returned by
+     * any method (S4-R042).
+     */
+    fun notifySettingsJson(): String {
+        val settings = notifyStore.settings()
+        return Json.encode(
+            linkedMapOf(
+                "enabled" to settings.enabled,
+                "chatId" to settings.chatId,
+                "tokenSet" to (settings.tokenSealed != null),
+                "lastDelivery" to notifier.lastDelivery()
+            )
+        )
+    }
+
+    /** Creates or updates the settings; the token is sealed before the write. */
+    fun notifySaveSettingsJson(body: String): String {
+        val raw = JsonParser.parseObjectOrNull(body)
+            ?: throw ApiException(400, "BAD_NOTIFY", "body must be a JSON object")
+        val draft = NotifyDraft(
+            enabled = raw["enabled"] as? Boolean ?: false,
+            chatId = (raw["chatId"] as? String).orEmpty(),
+            // A null token keeps the stored one; only an explicit clear removes it.
+            token = raw["token"] as? String,
+            clearToken = raw["clearToken"] as? Boolean ?: false
+        )
+        val saved = notifyStore.save(draft)
+        audited("notify.save", "enabled=${saved.enabled} configured=${saved.isConfigured()}")
+        return Json.encode(
+            linkedMapOf(
+                "ok" to true,
+                "enabled" to saved.enabled,
+                "configured" to saved.isConfigured()
+            )
+        )
+    }
+
+    /** Sends one message now; `ok` is true only for a provider `{"ok":true}`. */
+    fun notifyTestJson(): String {
+        val result = notifier.sendTest()
+        if (result["ok"] == true) {
+            safeAudit("notify.test", "ok=true")
+        } else {
+            safeAudit("notify.test", "ok=false code=${result["code"]}")
+        }
+        return Json.encode(result)
+    }
+
     // --------------------------------------------------- Lightning probe (D52)
 
     fun lightningProbeJson(): String {
@@ -683,7 +753,10 @@ class ServerRuntime(
         agent?.stop()
         agent = null
         agentPort = -1
-        val detail = "cause=${cause} crashes=${policy.crashCount()}"
+        val quarantined = state == AgentState.QUARANTINED
+        // The outcome is part of the record: a notification must not say
+        // "restarting" for a crash that quarantined the agent.
+        val detail = "cause=${cause} crashes=${policy.crashCount()} quarantined=$quarantined"
         safeAudit("agent.crash", detail)
         if (state == AgentState.QUARANTINED) {
             GromPrefs.setQuarantined(context, policy.quarantineReason)
@@ -792,6 +865,7 @@ class ServerRuntime(
             // S2-R034: no state change without a record.
             throw ApiException(500, "AUDIT_FAILED", "audit append failed; request aborted")
         }
+        notifier.onAudit(action, detail)
     }
 
     private fun safeAudit(action: String, detail: String) {
@@ -800,6 +874,15 @@ class ServerRuntime(
         } catch (_: Exception) {
             log("audit append failed for $action")
         }
+        // One funnel for both audit paths, so a supervisor event and an API
+        // action notify identically (D65). Only *recorded* actions reach this,
+        // so a message never describes something the chain does not contain.
+        notifier.onAudit(action, detail)
+    }
+
+    /** Gives the queue a bounded chance to flush before the process goes away. */
+    fun flushNotifications(timeoutMs: Long) {
+        notifier.flush(timeoutMs)
     }
 
     private fun actor(): String = "api:${tokenFingerprint()}"

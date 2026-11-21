@@ -164,4 +164,30 @@ class ConfigExportTest {
         assertFalse(text.contains(passwordHash))
         assertFalse(text.contains(sealedKey))
     }
+
+    @Test
+    fun notificationsExportTheStateButNeverTheChatOrTheToken() {
+        val chatSentinel = "987654321"
+        val tokenSentinel = "123456789:" + "Z".repeat(35)
+        val block = mapOf(
+            "enabled" to true,
+            "configured" to true,
+            "lastDelivery" to mapOf("ok" to true, "atMs" to 1_700_000_000_000L),
+            // Even if a richer map arrives, the export is an allow-list.
+            "chatId" to chatSentinel,
+            "token" to tokenSentinel
+        )
+        val text = ConfigExport.render(config, emptyMap(), notifications = block)
+        val parsed = JsonParser.parseObjectOrNull(text)!!
+
+        val notifications = parsed["notifications"] as Map<*, *>
+        assertEquals(setOf("enabled", "configured", "lastDelivery"), notifications.keys)
+        assertEquals(true, notifications["enabled"])
+        val last = notifications["lastDelivery"] as Map<*, *>
+        assertEquals(true, last["ok"])
+        assertEquals(1_700_000_000_000L, last["atMs"])
+
+        assertFalse("the chat id must not leave the device", text.contains(chatSentinel))
+        assertFalse("the bot token must not leave the device", text.contains(tokenSentinel))
+    }
 }

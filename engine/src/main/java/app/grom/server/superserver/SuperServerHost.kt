@@ -41,7 +41,12 @@ class SuperServerHost(
      * (D58). Both are lazily read so a heartbeat refresh needs no rebuild.
      */
     private val projects: () -> List<Map<String, Any?>> = { emptyList() },
-    private val bridge: () -> Map<String, Any?> = { emptyMap() }
+    private val bridge: () -> Map<String, Any?> = { emptyMap() },
+    /**
+     * The operator-notification state (D65-D67). Sanitised by the notifier:
+     * enabled, configured and the measured last delivery only.
+     */
+    private val notifications: () -> Map<String, Any?> = { emptyMap() }
 ) {
 
     private val lock = Any()
@@ -170,7 +175,8 @@ class SuperServerHost(
             },
             "referral" to ReferralStore.summary(appContext),
             "projects" to projects(),
-            "bridge" to bridge()
+            "bridge" to bridge(),
+            "notifications" to notifications()
         ) + SuperStatusDocument.build(config, lightningStatus)
     }
 
@@ -231,7 +237,8 @@ class SuperServerHost(
                         registry.find("lightning")?.status() ?: emptyMap()
                     ) + mapOf(
                         "projects" to projects(),
-                        "bridge" to bridge()
+                        "bridge" to bridge(),
+                        "notifications" to notifications()
                     )
                 },
                 LightningPlugin(backend, loaded.lightning.kind.wireName, backendError)
