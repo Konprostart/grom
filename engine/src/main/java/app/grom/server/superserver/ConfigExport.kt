@@ -70,7 +70,12 @@ object ConfigExport {
                 "health" to linkedMapOf(
                     "configured" to (lightning["configured"] == true),
                     "reachable" to (lightning["reachable"] as? Boolean)
-                )
+                ),
+                // Reference to a node on the operator's own server. Its endpoint
+                // is deliberately absent: the export leaves the device (D63).
+                "externalNode" to config.lightning.externalNode
+                    .takeUnless { it.isEmpty() }
+                    ?.toPublicJson()
             )
         )
     )

@@ -20,10 +20,12 @@ import app.grom.server.http.GromApi
 import app.grom.server.http.HttpResponse
 import app.grom.server.http.LoopbackHttpServer
 import app.grom.server.http.Router
+import app.grom.server.projects.ProjectNamespace
 import app.grom.server.projects.ProjectRegistry
 import app.grom.server.service.GromPrefs
 import app.grom.server.ssh.SshAuth
 import app.grom.server.ssh.SshKeys
+import app.grom.server.ssh.SshTarget
 import app.grom.server.ssh.SshTargetDraft
 import app.grom.server.ssh.SshTargetStore
 import app.grom.server.ssh.SshTunnelManager
@@ -420,6 +422,33 @@ class ServerRuntime(
         audited("project.remove", "id=$id")
     }
 
+    /**
+     * Runs a key/value op inside one project's namespace (D61).
+     *
+     * The caller names its project and an *unscoped* key; the prefix is added
+     * here, never taken from the request. Only `kv.get` and `kv.put` are
+     * reachable, and only for a project that is actually registered — so this
+     * surface cannot be used to run arbitrary agent ops or to reach a
+     * neighbour's data.
+     *
+     * @throws ApiException with a stable code; the caller maps it to `GROM_E_*`.
+     */
+    fun projectExec(projectId: String, op: String, argsJson: String?): Pair<Int, String> {
+        ProjectNamespace.requireValidProjectId(projectId)
+        if (projectRegistry.list().none { it.id == projectId }) {
+            throw ApiException(
+                403,
+                "PROJECT_NOT_REGISTERED",
+                "project '$projectId' has not announced itself to this engine"
+            )
+        }
+        // Op whitelist, key ownership and value size are decided by the pure
+        // builder, so the same rules are unit-tested without a binder.
+        val body = ProjectNamespace.buildRequest(projectId, op, argsJson)
+        val response = exec(op, body)
+        return response.status to response.body
+    }
+
     /** The sanitised hand-off document (D53); never a serialisation of the config. */
     fun configExportJson(): String {
         val superStatus = superServer.status()
@@ -438,14 +467,27 @@ class ServerRuntime(
 
     // ------------------------------------------------------- SSH bridge (D58)
 
-    fun sshStatusJson(): String = Json.encode(
-        mapOf(
-            "available" to SshKeys.isSupported(),
-            "maxTargets" to 8,
-            "maxActive" to 2,
-            "targets" to sshTunnels.statusForUi()
+    fun sshStatusJson(): String {
+        val targets = sshTunnels.statusForUi()
+        val active = targets.count { it["state"] == "connected" }
+        return Json.encode(
+            mapOf(
+                "available" to SshKeys.isSupported(),
+                // No saved-target cap (D64); only live tunnels are limited.
+                "maxActive" to SshTarget.MAX_ACTIVE,
+                "advisoryTargets" to SshTarget.ADVISORY_TARGETS,
+                "activeCount" to active,
+                // The advisory is derived from what is saved and connected, and
+                // a saved server is never reported as running.
+                "advisory" to when {
+                    targets.size > SshTarget.ADVISORY_TARGETS ->
+                        "EXTRA_SERVERS_IDLE"
+                    else -> null
+                },
+                "targets" to targets
+            )
         )
-    )
+    }
 
     /**
      * Generates an Ed25519 pair. The private key text is returned exactly once

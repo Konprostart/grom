@@ -11,8 +11,10 @@ package app.grom.sdk.ipc;
  *
  * API 2 added the public-data-plane reload (D39). API 3 adds the embeddable
  * surface (D55): project registration, the sanitised config export, a direct
- * agent exec, and the operator's SSH bridge (D58). Every new method goes
- * through the same per-transaction signature gate as the older ones.
+ * agent exec, and the operator's SSH bridge (D58). API 4 adds project-scoped
+ * key/value access (D61), so an embedded project can only reach its own keys.
+ * Every new method goes through the same per-transaction signature gate as the
+ * older ones.
  */
 interface IGromServer {
 
@@ -62,6 +64,17 @@ interface IGromServer {
      * are data, never manufactured success.
      */
     String agentExec(String op, String argsJson);
+
+    // ------------------------------------------------------- API 4 (D61)
+
+    /**
+     * Runs `kv.get` or `kv.put` inside [projectId]'s own namespace and returns
+     * `{"status":…,"body":…}`. The engine computes the `p:<projectId>:` prefix
+     * itself, so a project can never read or overwrite another project's keys.
+     * A key that already carries a foreign prefix is refused with
+     * `PROJECT_KEY_INVALID`; an unregistered project is refused outright.
+     */
+    String projectExec(String projectId, String op, String argsJson);
 
     // ------------------------------------------------------------- SSH bridge
 

@@ -3,6 +3,8 @@ package app.grom.server.superserver
 
 import app.grom.server.http.Json
 import app.grom.server.superserver.nostr.RemoteBridgeHint
+import app.grom.server.superserver.plugins.lightning.ExternalNodeKind
+import app.grom.server.superserver.plugins.lightning.ExternalNodeRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -39,6 +41,23 @@ class SuperStatusDocumentTest {
         assertNull(doc["npub"])
         assertEquals(emptyList<String>(), doc["relays"])
         assertNull(doc["remoteBridge"])
+        assertNull(doc["externalNode"])
+    }
+
+    @Test
+    fun anExternalNodeIsPublishedWithoutItsEndpoint() {
+        val node = ExternalNodeRef(ExternalNodeKind.LND, "VPS node", "node.example.com:10009")
+        val doc = SuperStatusDocument.build(
+            SuperServerConfig(lightning = LightningSettings(externalNode = node)),
+            emptyMap()
+        )
+        val block = doc["externalNode"] as Map<*, *>
+        assertEquals("lnd", block["kind"])
+        assertEquals("VPS node", block["label"])
+        assertEquals(true, block["configured"])
+        assertFalse(block.containsKey("endpointHint"))
+        assertFalse(Json.encode(doc).contains("node.example.com"))
+        assertFalse(Json.encode(doc).contains("10009"))
     }
 
     @Test

@@ -162,15 +162,38 @@ class SshTargetStoreTest {
     }
 
     @Test
-    fun `at most eight targets are kept`() {
+    fun `saved targets have no count cap`() {
+        // D64: only live tunnels are capped. Saving many servers must keep
+        // working, so the operator is never told "no" for storage reasons.
         val store = store()
-        repeat(SshTarget.MAX_TARGETS) { index ->
+        repeat(20) { index ->
             store.upsert(passwordDraft().copy(label = "host $index", host = "10.0.0.$index"))
         }
-        val failure = runCatching {
-            store.upsert(passwordDraft().copy(label = "too many", host = "10.0.0.99"))
-        }.exceptionOrNull()
-        assertTrue(failure is ApiException && failure.code == "TOO_MANY_TARGETS")
+        assertEquals(20, store.list().size)
+    }
+
+    @Test
+    fun `a full store refuses the write instead of becoming unreadable`() {
+        // A deliberately tiny cap: the guard must trip at write time, because an
+        // over-size file would make every record unreadable on the next start.
+        val store = SshTargetStore(
+            File(temp.root, SshTargetStore.FILE_NAME),
+            ReversingBox(),
+            maxFileBytes = 800
+        )
+        var saved = 0
+        var refused: ApiException? = null
+        while (saved < 50 && refused == null) {
+            val attempt = runCatching {
+                store.upsert(passwordDraft().copy(label = "host $saved", host = "10.0.0.$saved"))
+            }
+            refused = attempt.exceptionOrNull() as? ApiException
+            if (refused == null) saved++
+        }
+        assertEquals("SSH_STORE_FULL", refused?.code)
+        assertTrue("at least the first target must fit", saved > 0)
+        // Whatever was written before the refusal is still readable.
+        assertEquals(saved, store.list().size)
     }
 
     @Test

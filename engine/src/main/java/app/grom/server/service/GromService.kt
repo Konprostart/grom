@@ -152,6 +152,26 @@ class GromService : Service() {
             return Json.encode(mapOf("status" to result.status, "body" to result.body))
         }
 
+        // ------------------------------------------------- API 4 (D61)
+
+        override fun projectExec(
+            projectId: String?,
+            op: String?,
+            argsJson: String?
+        ): String {
+            requireSameSigner()
+            return try {
+                val result = runtime.projectExec(
+                    projectId.orEmpty(),
+                    op.orEmpty(),
+                    argsJson
+                )
+                Json.encode(mapOf("status" to result.first, "body" to result.second))
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
         // ------------------------------------------------------- SSH bridge
 
         override fun sshStatusJson(): String {

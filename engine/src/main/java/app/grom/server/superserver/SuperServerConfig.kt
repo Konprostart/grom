@@ -10,6 +10,7 @@ import app.grom.server.superserver.auth.Ed25519
 import app.grom.server.superserver.nostr.Nip19
 import app.grom.server.superserver.nostr.RelayUrl
 import app.grom.server.superserver.nostr.RemoteBridgeHint
+import app.grom.server.superserver.plugins.lightning.ExternalNodeRef
 import java.util.Base64
 
 /**
@@ -76,7 +77,13 @@ data class LightningSettings(
     val baseUrl: String = "",
     val timeoutMs: Int = 8_000,
     /** AES-GCM ciphertext from [app.grom.server.store.SecretBox]; never plaintext. */
-    val apiKeySealed: String? = null
+    val apiKeySealed: String? = null,
+    /**
+     * A description of a node that lives on the operator's own server (D63).
+     * Reference only: no gRPC, no NWC client, no socket. Its endpoint never
+     * leaves the device.
+     */
+    val externalNode: ExternalNodeRef = ExternalNodeRef()
 ) {
     fun isConfigured(): Boolean = kind != LightningKind.NONE && baseUrl.isNotBlank()
 }
@@ -121,8 +128,12 @@ data class SuperServerConfig(
     fun sameRuntimePolicy(other: SuperServerConfig): Boolean =
         runtimePolicy() == other.runtimePolicy()
 
-    private fun runtimePolicy(): SuperServerConfig =
-        copy(npub = null, relays = emptyList(), remoteBridge = null)
+    private fun runtimePolicy(): SuperServerConfig = copy(
+        npub = null,
+        relays = emptyList(),
+        remoteBridge = null,
+        lightning = lightning.copy(externalNode = ExternalNodeRef())
+    )
 
     fun hasCredential(): Boolean =
         !passwordHash.isNullOrBlank() || enabledKeys().isNotEmpty()
@@ -248,6 +259,9 @@ data class SuperServerConfig(
                 return ConfigCheck.Invalid("BAD_REMOTE_BRIDGE", problem)
             }
         }
+        lightning.externalNode.validate()?.let { problem ->
+            return ConfigCheck.Invalid("BAD_EXTERNAL_NODE", problem)
+        }
 
         return ConfigCheck.Ok
     }
@@ -272,7 +286,8 @@ data class SuperServerConfig(
                 "kind" to lightning.kind.wireName,
                 "baseUrl" to lightning.baseUrl,
                 "timeoutMs" to lightning.timeoutMs,
-                "apiKeySealed" to lightning.apiKeySealed
+                "apiKeySealed" to lightning.apiKeySealed,
+                "externalNode" to lightning.externalNode.toJson()
             ),
             "acknowledgePublicBind" to acknowledgePublicBind,
             "sessionTtlMs" to sessionTtlMs,
@@ -366,7 +381,8 @@ data class SuperServerConfig(
                 kind = LightningKind.fromWire(this["kind"] as? String),
                 baseUrl = (this["baseUrl"] as? String)?.trim() ?: "",
                 timeoutMs = intOr(this["timeoutMs"], fallback.timeoutMs),
-                apiKeySealed = (this["apiKeySealed"] as? String)?.takeIf { it.isNotBlank() }
+                apiKeySealed = (this["apiKeySealed"] as? String)?.takeIf { it.isNotBlank() },
+                externalNode = ExternalNodeRef.fromJson(this["externalNode"]) ?: ExternalNodeRef()
             )
         }
     }

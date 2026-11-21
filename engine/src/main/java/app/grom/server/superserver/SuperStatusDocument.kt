@@ -38,6 +38,11 @@ object SuperStatusDocument {
             // null means "not probed yet", not "unhealthy".
             "reachable" to (lightning["reachable"] as? Boolean),
             "error" to ((lightning["error"] ?: lightning["detail"]) as? String)
-        )
+        ),
+        // Kind and label only. The endpoint is the operator's own address and
+        // stays on the device (D63).
+        "externalNode" to config.lightning.externalNode
+            .takeUnless { it.isEmpty() }
+            ?.toPublicJson()
     )
 }

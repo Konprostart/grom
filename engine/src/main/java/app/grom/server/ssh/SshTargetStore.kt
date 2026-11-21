@@ -20,7 +20,12 @@ import java.io.File
 class SshTargetStore(
     private val file: File,
     private val secretBox: SecretBox,
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    /**
+     * The only bound on how many servers may be saved (D64). Injectable so the
+     * refusal path can be tested without writing half a megabyte.
+     */
+    private val maxFileBytes: Int = MAX_FILE_BYTES
 ) {
 
     @Volatile
@@ -46,13 +51,6 @@ class SshTargetStore(
 
         val records = load().toMutableList()
         val existing = draft.id?.let { id -> records.firstOrNull { it.id == id } }
-        if (existing == null && records.size >= SshTarget.MAX_TARGETS) {
-            throw ApiException(
-                409,
-                "TOO_MANY_TARGETS",
-                "at most ${SshTarget.MAX_TARGETS} SSH targets may be saved"
-            )
-        }
 
         val id = existing?.id ?: SshTarget.newId()
         var passwordSealed = existing?.passwordSealed
@@ -181,7 +179,7 @@ class SshTargetStore(
         if (!file.isFile) return emptyList()
         return try {
             val text = file.readText()
-            if (text.length > MAX_FILE_BYTES) {
+            if (text.length > maxFileBytes) {
                 lastError = "ssh targets file is larger than $MAX_FILE_BYTES bytes"
                 return emptyList()
             }
@@ -217,6 +215,17 @@ class SshTargetStore(
                 "targets" to records.map(::toJson)
             )
         )
+        // There is no count cap (D64), so the file size is the real bound. It is
+        // enforced *before* the write: refusing here keeps `load` able to read
+        // every record, whereas an over-size write would make the whole list
+        // unreadable on the next start.
+        if (text.length > maxFileBytes) {
+            throw ApiException(
+                409,
+                "SSH_STORE_FULL",
+                "the saved-server file is full (limit $maxFileBytes bytes); remove a server first"
+            )
+        }
         val temp = File(file.parentFile, "${file.name}.tmp")
         temp.writeText(text)
         harden(temp)
@@ -276,6 +285,12 @@ class SshTargetStore(
 
     companion object {
         const val FILE_NAME: String = "ssh-targets.json"
-        private const val MAX_FILE_BYTES: Int = 64 * 1024
+
+        /**
+         * 512 KiB of JSON, roughly a few hundred targets with a sealed Ed25519
+         * key each. Large enough that the operator never meets it in practice,
+         * small enough that one broken file cannot exhaust storage.
+         */
+        const val MAX_FILE_BYTES: Int = 512 * 1024
     }
 }

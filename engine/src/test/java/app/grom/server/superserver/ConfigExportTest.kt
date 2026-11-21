@@ -4,6 +4,8 @@ package app.grom.server.superserver
 import app.grom.server.core.BindMode
 import app.grom.server.http.JsonParser
 import app.grom.server.superserver.nostr.RemoteBridgeHint
+import app.grom.server.superserver.plugins.lightning.ExternalNodeKind
+import app.grom.server.superserver.plugins.lightning.ExternalNodeRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -133,5 +135,33 @@ class ConfigExportTest {
         assertFalse("the export must not carry an SSH host", serialised.contains("\"host\""))
         assertFalse(serialised.contains(sealedKey))
         assertFalse(serialised.contains(passwordHash))
+    }
+
+    @Test
+    fun anExternalNodeExportsItsKindAndLabelButNeverItsEndpoint() {
+        val endpointSentinel = "endpoint-sentinel.example:10009"
+        val withNode = config.copy(
+            lightning = config.lightning.copy(
+                externalNode = ExternalNodeRef(
+                    ExternalNodeKind.LND,
+                    "VPS node",
+                    endpointSentinel
+                )
+            )
+        )
+        val text = ConfigExport.render(withNode, emptyMap())
+        val parsed = JsonParser.parseObjectOrNull(text)!!
+
+        val lightning = parsed["lightning"] as Map<*, *>
+        val node = lightning["externalNode"] as Map<*, *>
+        assertEquals("lnd", node["kind"])
+        assertEquals("VPS node", node["label"])
+        assertFalse(node.containsKey("endpointHint"))
+        assertFalse(text.contains(endpointSentinel))
+        assertFalse(text.contains("endpoint-sentinel.example"))
+
+        // The existing guarantees still hold with the new field present.
+        assertFalse(text.contains(passwordHash))
+        assertFalse(text.contains(sealedKey))
     }
 }

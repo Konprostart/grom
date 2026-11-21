@@ -125,6 +125,6 @@ class GromClient(
          * embeddable surface: projects, config export, agent exec and the SSH
          * bridge (D55, D58).
          */
-        const val API_VERSION: Int = 3
+        const val API_VERSION: Int = 4
     }
 }

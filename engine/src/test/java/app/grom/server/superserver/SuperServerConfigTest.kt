@@ -4,6 +4,8 @@ package app.grom.server.superserver
 import app.grom.server.core.BindMode
 import app.grom.server.superserver.auth.PasswordHash
 import app.grom.server.superserver.nostr.RemoteBridgeHint
+import app.grom.server.superserver.plugins.lightning.ExternalNodeKind
+import app.grom.server.superserver.plugins.lightning.ExternalNodeRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -233,6 +235,20 @@ class SuperServerConfigTest {
         assertTrue(base.sameRuntimePolicy(base.copy(npub = validNpub)))
         assertTrue(base.sameRuntimePolicy(base.copy(relays = listOf("wss://a.example"))))
         assertTrue(base.sameRuntimePolicy(base.copy(remoteBridge = RemoteBridgeHint("vps"))))
+        // An external node is a reference too: editing it must not drop sessions.
+        assertTrue(
+            base.sameRuntimePolicy(
+                base.copy(
+                    lightning = base.lightning.copy(
+                        externalNode = ExternalNodeRef(
+                            ExternalNodeKind.LND,
+                            "VPS node",
+                            "node.example.com:10009"
+                        )
+                    )
+                )
+            )
+        )
         assertFalse(base.sameRuntimePolicy(base.copy(port = 47_003)))
         assertFalse(base.sameRuntimePolicy(base.copy(auth = AuthMode.KEY)))
         assertFalse(base.sameRuntimePolicy(base.copy(enabled = false)))
@@ -242,5 +258,47 @@ class SuperServerConfigTest {
                 base.copy(lightning = LightningSettings(LightningKind.LNBITS, "https://x.example"))
             )
         )
+    }
+
+    @Test
+    fun externalNodeReferenceIsValidatedAndRoundTrips() {
+        val node = ExternalNodeRef(ExternalNodeKind.CLN, "Home node", "10.0.0.5:9736")
+        val withNode = config().copy(
+            lightning = config().lightning.copy(externalNode = node)
+        )
+        assertEquals(ConfigCheck.Ok, withNode.validate(47_001))
+
+        val replayed = SuperServerConfig.fromJson(withNode.toJson())
+        assertEquals(node, replayed?.lightning?.externalNode)
+
+        val withoutKind = withNode.copy(
+            lightning = withNode.lightning.copy(
+                externalNode = ExternalNodeRef(ExternalNodeKind.NONE, "Home node", "")
+            )
+        )
+        val refused = withoutKind.validate(47_001)
+        assertTrue(refused is ConfigCheck.Invalid && refused.code == "BAD_EXTERNAL_NODE")
+
+        val secretLabel = withNode.copy(
+            lightning = withNode.lightning.copy(
+                externalNode = ExternalNodeRef(ExternalNodeKind.LND, "nsec1abc", "")
+            )
+        )
+        val refusedSecret = secretLabel.validate(47_001)
+        assertTrue(refusedSecret is ConfigCheck.Invalid && refusedSecret.code == "BAD_EXTERNAL_NODE")
+    }
+
+    @Test
+    fun anExternalNodeEndpointIsNotAUrl() {
+        val urlNode = config().copy(
+            lightning = config().lightning.copy(
+                externalNode = ExternalNodeRef(
+                    ExternalNodeKind.LND,
+                    "node",
+                    "https://node.example.com"
+                )
+            )
+        )
+        assertTrue(urlNode.validate(47_001) is ConfigCheck.Invalid)
     }
 }

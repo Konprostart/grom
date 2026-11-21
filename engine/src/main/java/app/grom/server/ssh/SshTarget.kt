@@ -73,8 +73,21 @@ data class SshTarget(
 
     companion object {
         const val DEFAULT_FORWARD_PORT: Int = 47002
-        const val MAX_TARGETS: Int = 8
+
+        /**
+         * How many tunnels may be *up at once*. This cap is about the phone, not
+         * about storage: every live tunnel costs a thread, a socket, an SSH
+         * session and a MINA transport. Saved targets are deliberately not
+         * capped (D64) — the store's own size limit is the only bound, and
+         * exceeding it is reported instead of silently dropping records.
+         */
         const val MAX_ACTIVE: Int = 2
+
+        /**
+         * Above this many saved servers the UI shows an advisory. It is not a
+         * refusal: extra servers simply stay idle, and the reason is stated.
+         */
+        const val ADVISORY_TARGETS: Int = 2
 
         val ID_PATTERN: Regex = Regex("^[0-9a-f]{16}$")
         val LABEL_MAX: Int = 64
