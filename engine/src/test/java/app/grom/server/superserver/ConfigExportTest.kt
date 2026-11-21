@@ -58,6 +58,7 @@ class ConfigExportTest {
         assertEquals("Mostro VPS", bridge["label"])
 
         val dataPlane = parsed["dataPlane"] as Map<*, *>
+        assertEquals(true, dataPlane["enabled"])
         assertEquals("LAN", dataPlane["bind"])
         assertEquals(47_002L, dataPlane["port"])
         assertEquals("BOTH", dataPlane["auth"])
@@ -94,5 +95,43 @@ class ConfigExportTest {
         val health = (parsed["lightning"] as Map<*, *>)["health"] as Map<*, *>
         assertEquals(false, health["configured"])
         assertNull(health["reachable"])
+    }
+
+    @Test
+    fun exportsProjectsAndMeasuredBridgeWithoutAnyAddress() {
+        val parsed = JsonParser.parseObjectOrNull(
+            ConfigExport.render(
+                config = config,
+                lightning = mapOf("configured" to true, "reachable" to false),
+                projects = listOf(
+                    mapOf(
+                        "id" to "my-wallet",
+                        "title" to "My Wallet",
+                        "version" to "1.0",
+                        "capabilities" to listOf("kv"),
+                        "state" to "alive",
+                        "host" to "203.0.113.9",
+                        "username" to "grom"
+                    )
+                ),
+                bridge = mapOf("configured" to true, "connected" to true, "active" to 1)
+            )
+        )!!
+        val project = (parsed["projects"] as List<*>).single() as Map<*, *>
+        assertEquals("my-wallet", project["id"])
+        assertEquals("alive", project["state"])
+
+        val bridge = parsed["bridge"] as Map<*, *>
+        assertEquals(true, bridge["connected"])
+        assertEquals(1L, bridge["active"])
+
+        val serialised = parsed.toString()
+        assertFalse("the export must not carry an SSH address", serialised.contains("203.0.113.9"))
+        // "grom" is the document's own source name, so assert on the field
+        // name instead of the word: the project's host/user keys must be gone.
+        assertFalse("the export must not carry an SSH user", serialised.contains("username"))
+        assertFalse("the export must not carry an SSH host", serialised.contains("\"host\""))
+        assertFalse(serialised.contains(sealedKey))
+        assertFalse(serialised.contains(passwordHash))
     }
 }

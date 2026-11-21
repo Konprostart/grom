@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: Apache-2.0
+package app.grom.server.ssh
+
+import app.grom.server.http.ApiException
+import app.grom.server.store.SecretBox
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+
+class SshTargetStoreTest {
+
+    @get:Rule
+    val temp = TemporaryFolder()
+
+    /** Deterministic stand-in for the Android Keystore box. */
+    private class ReversingBox : SecretBox {
+        override fun seal(plaintext: String): String =
+            "sealed:" + plaintext.reversed()
+
+        override fun open(sealed: String): String? =
+            sealed.removePrefix("sealed:").takeIf { sealed.startsWith("sealed:") }?.reversed()
+    }
+
+    private fun store() = SshTargetStore(File(temp.root, SshTargetStore.FILE_NAME), ReversingBox())
+
+    private fun passwordDraft(id: String? = null) = SshTargetDraft(
+        id = id,
+        label = "Mostro VPS",
+        host = "203.0.113.10",
+        port = 22,
+        username = "grom",
+        auth = SshAuth.PASSWORD,
+        password = "s3cret-pass",
+        remoteForwardPort = 47002
+    )
+
+    @Test
+    fun `password is sealed, never written in clear text`() {
+        val store = store()
+        val saved = store.upsert(passwordDraft())
+        assertEquals("grom", saved.username)
+        assertNotNull(saved.passwordSealed)
+
+        val text = File(temp.root, SshTargetStore.FILE_NAME).readText()
+        assertFalse("the plaintext password must not be on disk", text.contains("s3cret-pass"))
+        assertTrue(text.contains("sealed:"))
+        assertEquals("s3cret-pass", store.openSecret(saved))
+    }
+
+    @Test
+    fun `key targets store the sealed private text and a public line`() {
+        val generated = SshKeys.generate()!!
+        val store = store()
+        val saved = store.upsert(
+            SshTargetDraft(
+                label = "key host",
+                host = "vps.example.org",
+                username = "grom",
+                auth = SshAuth.KEY,
+                privateKey = generated.privateKeyText
+            )
+        )
+        assertNotNull(saved.privateKeySealed)
+        assertNull(saved.passwordSealed)
+        assertNotNull(saved.publicKeyLine)
+        assertTrue(saved.publicKeyLine!!.startsWith("ssh-ed25519 "))
+
+        val text = File(temp.root, SshTargetStore.FILE_NAME).readText()
+        assertFalse(text.contains("OPENSSH PRIVATE KEY"))
+        assertEquals(generated.privateKeyText, store.openSecret(saved))
+    }
+
+    @Test
+    fun `an unparseable private key is refused`() {
+        val failure = runCatching {
+            store().upsert(
+                SshTargetDraft(
+                    label = "bad",
+                    host = "vps.example.org",
+                    username = "grom",
+                    auth = SshAuth.KEY,
+                    privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----"
+                )
+            )
+        }.exceptionOrNull()
+        assertTrue(failure is ApiException && failure.code == "BAD_KEY")
+    }
+
+    @Test
+    fun `key auth without a key is refused`() {
+        val failure = runCatching {
+            store().upsert(
+                SshTargetDraft(
+                    label = "no key",
+                    host = "vps.example.org",
+                    username = "grom",
+                    auth = SshAuth.KEY
+                )
+            )
+        }.exceptionOrNull()
+        assertTrue(failure is ApiException && failure.code == "KEY_REQUIRED")
+    }
+
+    @Test
+    fun `hostile hosts and labels are refused before any socket exists`() {
+        for (host in listOf("https://evil", "user@host", "host/path", "ho st", "-leading")) {
+            val failure = runCatching { store().upsert(passwordDraft().copy(host = host)) }
+                .exceptionOrNull()
+            assertTrue(
+                "expected BAD_HOST for '$host', got $failure",
+                failure is ApiException && failure.code == "BAD_HOST"
+            )
+        }
+        val failure = runCatching {
+            store().upsert(passwordDraft().copy(label = "x".repeat(65)))
+        }.exceptionOrNull()
+        assertTrue(failure is ApiException && failure.code == "BAD_LABEL")
+    }
+
+    @Test
+    fun `editing a target keeps the pin only when host and port are unchanged`() {
+        val store = store()
+        val saved = store.upsert(passwordDraft())
+        store.pinHostKey(saved.id, "SHA256:abc")
+
+        val edited = store.upsert(passwordDraft(id = saved.id).copy(label = "renamed"))
+        assertEquals("SHA256:abc", edited.hostKeySha256)
+
+        val moved = store.upsert(
+            passwordDraft(id = saved.id).copy(host = "198.51.100.7")
+        )
+        assertNull("a different host must not inherit the old pin", moved.hostKeySha256)
+    }
+
+    @Test
+    fun `a secret can be cleared explicitly`() {
+        val store = store()
+        val saved = store.upsert(passwordDraft())
+        val cleared = store.upsert(
+            passwordDraft(id = saved.id).copy(password = null, clearSecret = true)
+        )
+        assertNull(cleared.passwordSealed)
+        assertFalse(cleared.isConfigured())
+        assertNull(store.openSecret(cleared))
+    }
+
+    @Test
+    fun `delete and unknown ids are reported`() {
+        val store = store()
+        val saved = store.upsert(passwordDraft())
+        store.delete(saved.id)
+        assertTrue(store.list().isEmpty())
+
+        val failure = runCatching { store.delete(saved.id) }.exceptionOrNull()
+        assertTrue(failure is ApiException && failure.code == "TARGET_NOT_FOUND")
+    }
+
+    @Test
+    fun `at most eight targets are kept`() {
+        val store = store()
+        repeat(SshTarget.MAX_TARGETS) { index ->
+            store.upsert(passwordDraft().copy(label = "host $index", host = "10.0.0.$index"))
+        }
+        val failure = runCatching {
+            store.upsert(passwordDraft().copy(label = "too many", host = "10.0.0.99"))
+        }.exceptionOrNull()
+        assertTrue(failure is ApiException && failure.code == "TOO_MANY_TARGETS")
+    }
+
+    @Test
+    fun `a corrupt file degrades to empty with a reason`() {
+        val file = File(temp.root, SshTargetStore.FILE_NAME)
+        file.writeText("not json")
+        val store = store()
+        assertTrue(store.list().isEmpty())
+        assertNotNull(store.lastError)
+    }
+
+    @Test
+    fun `the pin is round-tripped and cleared deliberately`() {
+        val store = store()
+        val saved = store.upsert(passwordDraft())
+        store.pinHostKey(saved.id, "SHA256:xyz")
+        assertEquals("SHA256:xyz", store.find(saved.id)!!.hostKeySha256)
+        store.clearPin(saved.id)
+        assertNull(store.find(saved.id)!!.hostKeySha256)
+
+        val bad = runCatching { store.pinHostKey(saved.id, "MD5:123") }.exceptionOrNull()
+        assertTrue(bad is ApiException && bad.code == "BAD_FINGERPRINT")
+    }
+}

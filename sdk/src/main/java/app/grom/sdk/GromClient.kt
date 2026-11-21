@@ -17,7 +17,19 @@ import app.grom.sdk.ipc.IGromServer
  * GromService.onBind returns null. In both cases the listener is told the
  * connection failed rather than left waiting.
  */
-class GromClient(private val context: Context) {
+class GromClient(
+    private val context: Context,
+    private val target: Target = Target.STANDALONE
+) {
+
+    /**
+     * Where the server lives (D55).
+     *
+     * `STANDALONE` is the shipped Grom app. `EMBEDDED` means the caller *is* the
+     * host application that embeds the engine, so the component lives in the
+     * caller's own package and the signature gate matches by construction.
+     */
+    enum class Target { STANDALONE, EMBEDDED }
 
     interface Listener {
         fun onConnected(apiVersion: Int)
@@ -69,7 +81,7 @@ class GromClient(private val context: Context) {
         this.listener = listener
         if (bound) return true
         val intent = Intent(ACTION).apply {
-            setClassName(SERVER_PACKAGE, SERVICE_CLASS)
+            setClassName(serverPackage(), SERVICE_CLASS)
         }
         bound = runCatching { context.bindService(intent, connection, Context.BIND_AUTO_CREATE) }
             .getOrDefault(false)
@@ -98,12 +110,21 @@ class GromClient(private val context: Context) {
         }
     }
 
+    private fun serverPackage(): String = when (target) {
+        Target.STANDALONE -> SERVER_PACKAGE
+        Target.EMBEDDED -> context.packageName
+    }
+
     companion object {
         const val SERVER_PACKAGE: String = "app.grom.server"
         const val SERVICE_CLASS: String = "app.grom.server.service.GromService"
         const val ACTION: String = "app.grom.sdk.ipc.GROM_SERVER"
         const val PERMISSION: String = "app.grom.sdk.ipc.BIND_GROMSERVER"
-        /** API 2 adds [IGromServer.reloadSuperServer] (D39). */
-        const val API_VERSION: Int = 2
+        /**
+         * API 2 added [IGromServer.reloadSuperServer] (D39); API 3 adds the
+         * embeddable surface: projects, config export, agent exec and the SSH
+         * bridge (D55, D58).
+         */
+        const val API_VERSION: Int = 3
     }
 }
