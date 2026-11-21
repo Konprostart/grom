@@ -13,7 +13,8 @@ file (`requirement`), or is external to the build (`toolchain`/`runtime`).
 |---|---|---|---|---|
 | Kotlin standard library | 1.9.22 | Apache-2.0 | language runtime | requirement |
 | org.json | platform | Android | JSON on the platform (not bundled) | platform |
-| HttpURLConnection | platform | Android | the single operator-initiated update check (D37), not bundled | platform |
+| HttpURLConnection | platform | Android | the two compiled outbound hosts: the operator-initiated update check (D37) and the operator-enabled Telegram alert (D65), not bundled | platform |
+| Telegram Bot API (external service) | n/a | Telegram terms | delivery of the operator's own alerts (D65); no code, no SDK, no account — one HTTPS POST to a host the feature is pinned to | external |
 | Apache MINA SSHD (`sshd-core`) | 2.13.1 | Apache-2.0 | reverse SSH client for the operator's tunnel (D58); no server, no shell, no exec | requirement |
 | EdDSA-Java (`net.i2p.crypto:eddsa`) | 0.3.0 | CC0-1.0 | Ed25519 provider that MINA SSHD uses for generated and imported keys | requirement |
 | SLF4J API + no-op binding | 1.7.36 | MIT | MINA SSHD logging; the no-op binding guarantees no secret reaches logcat | requirement |

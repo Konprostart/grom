@@ -378,3 +378,30 @@ gradle :app:lintServer29Debug :app:lintPeripheral26Debug
 Plus, for a phase with a `[DEVICE]` item: the checklist in master plan §V.5,
 recorded in `docs/DEVICES.md` with the device model, Android version and the date.
 A phase without that record is `code-complete`, never `closed`.
+
+### Phase 1D — operator alerts, project ergonomics — **done**
+
+Delivered:
+
+| file | what it is |
+|---|---|
+| `engine/.../notify/NotifySettings.kt` | enabled / chat ID / sealed token, stable validation codes |
+| `engine/.../notify/NotifySettingsStore.kt` | owner-only atomic JSON, 64 KiB cap, token only as `SecretBox` ciphertext |
+| `engine/.../notify/NotifyEvent.kt` | the fixed event table (17 codes: 16 state events plus the test message), each with one English sentence |
+| `engine/.../notify/NotifyRules.kt` | pure `classify(action, detail)`: unknown actions ignored, detail parsed for a code only |
+| `engine/.../notify/TelegramNotifier.kt` | one daemon worker, 16-message queue, 10 s coalescing, 20/min, 2 attempts, 8 s timeout |
+| `engine/.../notify/NotifyStatus.kt` | the sanitised `{enabled, configured, lastDelivery}` block |
+| `app/.../ui/NotifyModel.kt` | pure lamp projection: green only after a measured `ok=true` |
+| `app/.../ui/HelpModel.kt` | role-aware help: three blocks on `peripheral26`, four on `server29` |
+| `sdk/.../IGromServer.aidl` | API 5: `notifySettingsJson`, `notifySaveSettings`, `notifyTestJson` |
+
+Gate: `tools/run-gates` 9/9, policy **33/33**, both flavours green, lint 0/0,
+`TelegramNotifierTest` proving the queue, coalescing, the two attempts, the rate
+limit and that a token never appears in an error.
+
+Not closed by this phase: **no message has been sent to the real Bot API from a
+device.** The tests use a fake transport; the host half is code-reviewed only.
+
+Exit criteria for anything that depends on the VPS side: the operator's `Send
+test message` must return `ok` on a physical phone before an alert is trusted —
+recorded as a B2 item, not a JVM item.

@@ -886,3 +886,67 @@ different messages.
 
 *Enforced by:* `SshTargetStoreTest` (no count cap; full store refuses the write
 and stays readable), `tools/test-policy`.
+
+## D65 — Telegram alerts are the fourth, and last, compiled host
+**ACCEPTED.** Grom may post a short state message to the operator's own chat
+through the Telegram Bot API. This amends `S1-R003` with a fourth explicit
+outbound case (S1-R038).
+
+The host `https://api.telegram.org` is compiled in because it cannot be
+otherwise: the Bot API is one host, not a URL the operator supplies. Every other
+property that made D48 acceptable is preserved: the feature is off unless the
+operator enables it, the bot token is entered at runtime and never compiled in,
+the message body is a fixed string from a table, and delivery is bounded.
+
+`tools/test-policy` check 17 is rewritten to allow exactly two compiled hosts —
+the update feed (`UpdateChecker.kt`) and the Bot API (`notify/TelegramNotifier.kt`)
+— and to fail if either host appears anywhere else.
+
+*Why not route it through the SSH bridge:* the bridge is a **reverse** tunnel
+(`tcpip-forward`); it lets the VPS reach the phone. It does not proxy the
+phone's outbound traffic. Using it for alerts would mean adding a SOCKS/proxy
+client plus a relay on the VPS — more moving parts, a weaker audit trail, and a
+new failure mode. A direct HTTPS POST with a fixed body is smaller and easier to
+prove.
+
+*Enforced by:* `tools/test-policy` 17/32, `TelegramNotifierTest`.
+
+## D66 — Delivery is bounded; there is no scheduler and no disk queue
+**ACCEPTED.** One message = at most **two** attempts (immediately, then once
+after 4 s), an 8 s timeout, a 16-message in-memory queue that drops the oldest,
+coalescing of the same event within 10 s, and a hard ceiling of 20 messages per
+minute. There is no `Timer`, no `ScheduledExecutorService`, no
+`scheduleAtFixedRate`, and no persisted queue to replay after a restart.
+
+A failed delivery is recorded as failed with a stable code and reported as such.
+`Send test message` is synchronous and bypasses the queue and the rate limit,
+because the operator asked at that moment; it still requires `{"ok":true}`.
+
+*Why:* an alert system that silently retries forever becomes an unbounded
+outbound client — exactly what `S1-R003` exists to prevent. Two attempts absorb
+a single Wi-Fi hiccup; anything more is a monitoring service, which Grom is not.
+
+*Enforced by:* `TelegramNotifierTest`, `tools/test-policy` 33 (no scheduler
+symbol in the notify package).
+
+## D67 — Notification state is measured, sanitised, and never leaves the device whole
+**ACCEPTED.** The bot token is stored only as `SecretBox` ciphertext. The chat ID
+is not a secret but it identifies the device's owner, so it stays on the phone:
+`/v1/status`, the sanitised export and the audit log carry
+`{enabled, configured, lastDelivery:{ok, atMs}}` and nothing else.
+
+The lamp follows the same rule as every other lamp (D56): it is green only after
+a delivery the provider accepted, red after a rejection, grey before the first
+attempt. `configured=true` never turns it green.
+
+The message contains the event text plus an optional stable code and project id.
+It never contains the token, the chat ID, an SSH host or user, a fingerprint, a
+Lightning URL, an `npub`, a relay, a balance or free-form exception text.
+
+*Why:* one leaking alert would undo the care taken everywhere else — the chat
+ID is the identifier an attacker needs to spam the operator, and the SSH host is
+the address of their infrastructure.
+
+*Enforced by:* `NotifySettingsStoreTest` (no plaintext on disk),
+`NotifyRulesTest` (no `detail` passthrough), `TelegramNotifierTest` (no token in
+an error), `ConfigExportTest` (chat-ID sentinel), `tools/test-policy` 24/33.

@@ -406,3 +406,22 @@ test asserts the endpoint text is absent.
 A change that only touches reference fields — `npub`, `relays`, `remoteBridge`
 or `lightning.externalNode` — MUST NOT restart the listener or drop sessions
 (extends D54).
+
+### S5-R042
+`/v1/status` MUST carry a `notifications` block of `enabled`, `configured` and
+`lastDelivery = {ok, atMs}`. `ok` is the measured result of the last delivery
+attempt; it MUST NOT be derived from configuration. `GET /v1/health` MUST NOT
+carry the block.
+
+### S5-R043
+The `notifications` block MUST NOT contain the chat ID, the bot token, or any
+part of either. The sanitised export MUST publish the same three fields and
+nothing else. The static gate asserts that neither `ConfigExport` nor
+`NotifyStatus` names a credential identifier.
+
+### S5-R044
+Notification settings are device-level and independent of the data plane:
+changing them MUST NOT stop, restart or rebind the listener, and a delivery
+failure MUST NOT change the data plane's reported state. The agent plugin's
+`status` op carries the block through the same `statusExtra` callback; its
+`health` op does not.

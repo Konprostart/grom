@@ -446,3 +446,32 @@ hand-off document (npub, relays, bridge label, data-plane shape, Lightning
 health) to the VPS without ever copying a password hash, a key or a sealed
 backend credential.
 
+
+## 11. Notifications in the status document
+
+An authenticated `GET /v1/status` — and the `agent` plugin's `status` op —
+include the operator-notification state (D65–D67):
+
+```json
+"notifications": {
+  "enabled": true,
+  "configured": true,
+  "lastDelivery": { "ok": false, "atMs": 1730000000000 }
+}
+```
+
+`configured` means a bot token and a numeric chat ID are stored; `enabled` is the
+operator's switch. `lastDelivery.ok` is the **measured** result of the last
+attempt: `true` only when the provider answered `{"ok":true}`, `false` after a
+rejection, and `null` (never sent) before the first attempt. Configuration alone
+never makes it `true`.
+
+Deliberately absent: the chat ID and the bot token. `chatId` identifies the
+device's owner, so it stays on the phone exactly like an SSH host (D59); the
+token is a credential and is stored only as Keystore ciphertext.
+
+None of it is in `GET /v1/health`, which answers without credentials (S5-R042).
+
+See [`NOTIFICATIONS.md`](NOTIFICATIONS.md) for setup, the event table, the
+delivery limits and what cannot work: when the process is dead, no alert is
+sent, because Grom is the sender.

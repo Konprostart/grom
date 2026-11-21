@@ -876,19 +876,48 @@ the bind policies it already has (`BindPolicy`, `SuperBindPolicy`, D5, D41, D47)
 | **frp** | the device, outbound | bind `LOOPBACK`; `frpc` outside Grom | your frps, plus TLS on the legs | a public frps host | a VPS | self-hosted tunnel, Apache-2.0 |
 | **SSH tunnel** | the device, outbound | bind `LOOPBACK`; `ssh -R` | SSH | a host you already SSH to | existing server | lowest-tech option that works everywhere |
 
-### L.3 What Grom does about tunnels: nothing, on purpose
+### L.3 What Grom does about tunnels: one narrow case, and nothing else
 
-Grom bundles no tunnel client, starts no tunnel and supervises none — the same
-rule as the reference config (D52, S5-R032: stored, never connected). Reasons: a
-bundled client phones home and is a binary Grom cannot audit at the operator's
-cadence; a mandatory provider contradicts S1-R004; tunnel clients are a moving
+Since Phase 1C, Grom **does** open one kind of tunnel itself: a **reverse SSH**
+session to a server the operator saved (D58, `docs/SSH-BRIDGE.md`). It exists
+because a phone behind CGNAT has no other way to be reachable, and because SSH is
+the lowest-tech option that works everywhere. The scope is deliberately tiny:
+one `tcpip-forward` per connection, no shell, no exec, no agent/X11 forwarding,
+no local or dynamic forwarding, a host key pinned on first use, and a
+client-side filter that accepts only the local data plane as a destination. It is
+opened by an explicit tap and never by a timer.
+
+Everything else stays outside Grom, for the reasons that survive: a bundled
+provider client phones home and is a binary Grom cannot audit at the operator's
+cadence; a mandatory provider contradicts S1-R004; TURN-like clients are a moving
 target better updated by their own app; and `remoteBridge` (`label`,
-`description`) exists so the operator can *remember* which VPS sits behind the
+`description`) exists so the operator can *remember* which VPS sits behind a
 tunnel — a signpost, never a connection.
 
 What the plan does instead: name the TLS termination point for every path (L.2),
 warn in the UI on `PUBLIC` (S5-R029), and refuse any off-loopback bind without a
 credential (D41).
+
+### L.3a State change notification
+
+Grom can also tell the operator that something changed, through their own
+Telegram chat (D65–D67, `docs/NOTIFICATIONS.md`). This is the only *other*
+outbound connection outside the update check, the Lightning backend and the SSH
+bridge, and it is deliberately the narrowest one:
+
+- one compiled host (`api.telegram.org`), because the Bot API cannot be a
+  runtime-supplied URL;
+- the bot token is entered at runtime and stored only as Keystore ciphertext;
+- the message body is a fixed sentence from a table, plus a stable code and, for
+  project events, a project id;
+- two attempts, no scheduler, no disk queue, no replay, 20 messages a minute;
+- nothing at all when the process is dead — Grom is the sender, so a dead server
+  cannot report its own death. That needs an external observer (a cron job on
+  the VPS), which is out of scope here.
+
+A notification is one-way and carries no state back: it never becomes a control
+channel, and nothing in Grom waits for an answer.
+
 
 ### L.4 Domains, reverse proxies, and the gateway rule
 

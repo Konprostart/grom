@@ -255,3 +255,37 @@ same per-transaction signature gate as every other method.
 project registration MUST repeat the announcement every 30 s by default (clamped
 to 5 s … 10 min) until `GromEmbed.stop`, so the dashboard's `alive` state is
 derived from an ongoing heartbeat rather than a single claim.
+
+## 10. API 5 — operator notifications (D65–D67)
+
+`apiVersion()` returns `5`. API 5 is additive: every API 1–4 method is
+unchanged. It adds:
+
+```aidl
+String notifySettingsJson();
+String notifySaveSettings(String json);
+String notifyTestJson();
+```
+
+### S4-R042 (API 5)
+`notifySettingsJson()` MUST return
+`{"enabled":…,"chatId":…,"tokenSet":…,"lastDelivery":{…}}`. `chatId` is the
+operator's own chat identifier and is returned only over the signature-gated
+Binder; `tokenSet` is a boolean, and the token itself MUST NOT be returned by any
+method.
+
+### S4-R043 (API 5)
+`notifySaveSettings(json)` MUST accept `{enabled, chatId, token?, clearToken?}`
+and MUST seal the token through `SecretBox` before the write. A token that does
+not match the bot-token shape MUST be refused with `BAD_BOT_TOKEN`; a chat ID
+that is not numeric MUST be refused with `BAD_CHAT_ID`; `enabled` without a
+usable token or chat ID MUST be refused with `NOTIFY_NOT_CONFIGURED`. A `null`
+token MUST keep the stored one, so a caller can toggle `enabled` without
+resending the secret.
+
+### S4-R044 (API 5)
+`notifyTestJson()` MUST send one message synchronously and MUST report
+`{"ok":…,"code":…}` where `ok` is true only when the provider answered
+`{"ok":true}`. It MUST bypass the queue and the rate limit (the operator asked
+in that moment) and MUST NOT alter the event table. Every API 5 method MUST pass
+the same per-transaction signature gate (S4-R007).

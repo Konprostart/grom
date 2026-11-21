@@ -197,14 +197,33 @@ when (val write = project.put("theme", "dark")) {
 
 That namespace (`p:<projectId>:<key>`, API 4 `projectExec`) is an ownership gate
 on the API, not a sandbox between apps in the same UID. See
-[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the API 4 surface, the runtime
-requirement and the trust-boundary cost.
+[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the IPC surface (API 4 and 5), the
+runtime requirement and the trust-boundary cost.
 
 ## How Grom works
 
 The last section of the app explains, in plain language, what Grom does, why most
-people need no rented server, and when an external SSH server helps. It is
-static and reports no state, so it cannot claim anything is running.
+people need no rented server, when an external SSH server helps, and how the
+Telegram alerts work. It is static and reports no state, so it cannot claim
+anything is running.
+
+## Telegram alerts
+
+**Telegram alerts** sends a short message to the operator's own chat when
+something changes: the server started or stopped, an external server connected,
+failed or changed its host key, an app registered, or the agent crashed and was
+quarantined.
+
+Enter a bot token (from @BotFather) and a numeric chat ID, switch alerts on, and
+press **Send test message**. The token is sealed by the Android Keystore and is
+never returned by any API; the message text comes from a fixed table and carries
+an event code and, for project events, a project id — never a token, a chat ID, an
+SSH host, a relay, a balance or free-form exception text.
+
+Delivery is bounded: two attempts per message, a 16-message queue, coalescing
+within 10 s, at most 20 messages a minute, no scheduler and no disk queue. When
+the process is gone, nothing is sent — Grom is the sender. See
+[`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md).
 
 ## Reverse SSH bridge
 

@@ -99,11 +99,20 @@ missing. Ask the server for the truth:
 ```kotlin
 val client = GromEmbed.newClient(context)   // Target.EMBEDDED
 client.bind(object : GromClient.Listener {
-    override fun onConnected(apiVersion: Int) { /* apiVersion == 4 */ }
+    override fun onConnected(apiVersion: Int) { /* apiVersion == 5 */ }
     override fun onDisconnected(reason: String) { /* show the reason */ }
 })
 val status = client.call(null) { it.statusJson() }
 ```
+
+**Android 12 and later.** `startForegroundService` from the background throws
+`ForegroundServiceStartNotAllowedException`. `GromEmbed.start` catches it and
+returns `requested = false` with a `START_REFUSED:` reason, but the call should
+not be made from that position in the first place: call `start` from a visible
+`Activity` (or from a user-initiated broadcast), never from
+`Application.onCreate` or a background `WorkManager` job. A host that needs a
+boot start must use its own `BOOT_COMPLETED` receiver and explain the
+exemption, exactly as the standalone `server29` flavour does.
 
 `GromEmbed.newClient` uses the host's own package; the signature gate passes by
 construction because caller and service are the same UID.
@@ -115,7 +124,7 @@ disk.
 
 ---
 
-## 4. The API 4 surface
+## 4. The IPC surface (API 4 and 5)
 
 | Method | Purpose |
 |---|---|
@@ -127,9 +136,23 @@ disk.
 | `projectExec(projectId, op, args)` | **API 4**: `kv.get`/`kv.put` inside the caller's namespace |
 | `sshStatusJson()` … `sshClearPin(id)` | the operator's SSH bridge (D58) |
 | `lightningProbeJson()` | run the Lightning `health` op now |
+| `notifySettingsJson()` … `notifyTestJson()` | **API 5**: the operator's Telegram alerts (D65) |
 
 Every method runs the same per-transaction signature check as API 1 and 2. A
 foreign certificate still never reaches the server state.
+
+### Notifications are operator-level, not a host feature
+
+API 5 exists so the **operator** can receive state changes on their own phone.
+The engine does not ship a screen for it (D55: the library draws no UI), and it
+does not send a message on the host's behalf to any chat other than the one the
+operator configured, on the device the operator is holding.
+
+A host that wants its own alert surface must draw its own screen and call
+`notifySaveSettings`; there is no per-project chat, no per-project token and no
+way for one project to redirect another project's alerts. This is deliberate: a
+host that could pick the destination could exfiltrate state to a third party
+through the operator's bot.
 
 ### Project liveness
 

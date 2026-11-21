@@ -8,9 +8,10 @@ Normative requirements for Grom F1. IDs are stable; do not renumber.
 > plane; an operator may separately enable the data plane of S5 under D39 and
 > D41. `S1-R002` is narrowed, not repealed: Grom still holds no balance and
 > decides no payment, and the Lightning adapter (D43) only forwards to an
-> operator-configured backend. `S1-R003` is narrowed by D48: the process may
-> open a connection to a backend URL the operator supplied at runtime and must
-> never compile one in. `S1-R010` applies unchanged to the control plane; for the
+> operator-configured backend. `S1-R003` is narrowed by D48 and D65: the process
+> may open a connection to a backend URL the operator supplied at runtime and
+> must never compile one in, and it may post an operator-enabled notification to
+> the single notification host (S1-R038). `S1-R010` applies unchanged to the control plane; for the
 > data plane the bind is chosen by `SuperBindPolicy`, and a non-loopback choice
 > requires a credential and, for the wildcard, an explicit acknowledgement
 > (D41). No other S1 requirement changes.
@@ -29,7 +30,7 @@ balance, no account, no settlement, no payment credential.
 ### S1-R003
 Grom MUST NOT initiate an outbound connection to the internet on its own. There
 is no telemetry, analytics or crash reporting. Outbound connections are limited
-to three explicit, operator-initiated cases:
+to four explicit, operator-initiated cases:
 
 1. the update check (S1-R033): one HTTPS GET to the public release feed, only
    after the operator asks for it;
@@ -38,10 +39,14 @@ to three explicit, operator-initiated cases:
 3. the operator-saved SSH target (D58): a reverse-tunnel session to a host the
    operator entered, opened only by an explicit tap, restricted to
    `tcpip-forward`, with a pinned host key and a client-side filter that allows
-   only the local data plane as a destination.
+   only the local data plane as a destination;
+4. the operator-enabled notification delivery (D65, S1-R038): one HTTPS POST to
+   the single notification host, using a bot token the operator entered at
+   runtime and a fixed message body.
 
 There is no scheduler, no retry loop and no connection that Grom starts by
-itself.
+itself. The notification case allows at most one additional attempt per message
+(D66) and no periodic tick of any kind.
 
 ### S1-R004
 Grom MUST be usable with no account, no sign-in, and no cloud component.
@@ -211,3 +216,27 @@ The embedded surface (`projectsJson`, `announceProject`, `removeProject`,
 pass the same per-transaction signature gate as the API 1 surface (S4-R007).
 Embedding does not relax the gate; it only makes caller and service the same
 UID.
+
+## 13. Notifications (D65–D67)
+
+### S1-R038
+Grom MAY deliver a short state notification to one operator-configured chat,
+and only when all of the following hold:
+
+1. the operator has switched notifications on;
+2. a bot token and a numeric chat ID are configured;
+3. the message text is chosen from a fixed table of event codes;
+4. delivery is bounded: at most two attempts per message, no scheduler, no
+   periodic tick, no disk queue, no replay.
+
+The message MUST NOT contain a credential, an address, a device identifier or
+any free-form text taken from an exception or a log line. The bot token MUST be
+stored only as `SecretBox` ciphertext. The chat ID MUST NOT appear in
+`/v1/status`, in the sanitised export or in the audit log. A delivery failure
+MUST be reported as a failure with a stable code, never as success.
+
+### S1-R039
+Notification settings MUST NOT affect the data plane, the control plane or the
+agent: enabling, disabling, changing or failing to deliver a message MUST NOT
+change any other subsystem's state. `GET /v1/health` MUST NOT carry notification
+state.

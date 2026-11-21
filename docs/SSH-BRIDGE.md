@@ -166,3 +166,25 @@ listed in `third_party/THIRD_PARTY.md` and checked by
 provides a minimal stand-in and narrows lint's `InvalidPackage` suppression to
 that exact reference (`engine/lint.xml`). Without it, an exception-unwrapping
 path would throw `NoClassDefFoundError` on a device.
+
+## 8. Notifications
+
+If the operator has enabled alerts (`NOTIFICATIONS.md`, D65), the bridge emits a
+message on these transitions only:
+
+| audit action | message |
+|---|---|
+| `ssh.connect` | `Grom: external server connected.` |
+| `ssh.closed` (unexpected) | `Grom: external server disconnected.` |
+| `ssh.failed` | `Grom: external server connection failed (CODE).` |
+| `ssh.hostkey.mismatch` | `Grom: external server key changed; refused.` |
+
+`ssh.disconnect` (a deliberate tap), `ssh.hostkey.learned` and
+`ssh.hostkey.unverified` do **not** notify: the first is the operator's own
+action, and the other two are part of the first-use handshake the operator is
+looking at right now.
+
+The message carries the stable code (`SSH_UNAVAILABLE`, `SSH_TIMEOUT`,
+`HOST_KEY_MISMATCH`, `SSH_SESSION_CLOSED`) and never the host, the port, the user
+name or the fingerprint — the audit `detail` contains the target id and the
+host, and it is precisely what must not leave the device.
