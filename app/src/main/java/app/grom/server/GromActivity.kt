@@ -8,6 +8,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -24,10 +25,12 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import app.grom.server.core.BindMode
+import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
 import app.grom.server.referral.ReferralStore
 import app.grom.server.service.GromPrefs
 import app.grom.server.store.AndroidKeystoreSecretBox
+import app.grom.server.superserver.ApiKeyConfig
 import app.grom.server.superserver.AuthMode
 import app.grom.server.superserver.ConfigExport
 import app.grom.server.superserver.LightningKind
@@ -39,7 +42,9 @@ import app.grom.server.superserver.auth.PasswordHash
 import app.grom.server.superserver.nostr.Nip19
 import app.grom.server.superserver.nostr.RelayUrl
 import app.grom.server.superserver.nostr.RemoteBridgeHint
+import app.grom.server.ui.DashboardModel
 import app.grom.server.ui.GromTheme
+import app.grom.server.ui.Lamp
 import app.grom.server.ui.Palette
 import app.grom.server.ui.actionRow
 import app.grom.server.ui.actionRowState
@@ -48,7 +53,11 @@ import app.grom.server.ui.divider
 import app.grom.server.ui.dp
 import app.grom.server.ui.gap
 import app.grom.server.ui.label
+import app.grom.server.ui.lampView
 import app.grom.server.ui.pill
+import app.grom.server.ui.repaintLamp
+import app.grom.server.ui.sectionHeader
+import app.grom.server.ui.servingRow
 import app.grom.server.ui.shape
 import app.grom.server.ui.text
 import app.grom.server.update.UpdateChecker
@@ -58,12 +67,18 @@ import java.io.File
 import java.util.Base64
 
 /**
- * The operator surface: monochrome, one status, one primary action.
+ * The operator surface (D56).
  *
- * The screen is optional — the server is fully usable over the HTTP API and
- * Binder — but it is the honest face of the app. It says MISSING_RUNTIME when
- * the agent cannot start, never "running", and the update check is an explicit
- * operator action against the public GitHub release feed.
+ * One screen, one measured status, one primary action. Everything below the
+ * "Now serving" card is a collapsible section, so the dashboard stays quiet
+ * while the server is running. Every lamp is driven by
+ * [DashboardModel][app.grom.server.ui.DashboardModel]: configuration alone can
+ * never turn it green.
+ *
+ * The screen is optional — the server is fully usable over HTTP and Binder —
+ * but it is the honest face of the app. It says MISSING_RUNTIME when the agent
+ * cannot start, "not probed" for Lightning until a probe has really run, and
+ * "not connected" for a tunnel that is only configured.
  */
 class GromActivity : Activity() {
 
@@ -79,16 +94,16 @@ class GromActivity : Activity() {
     private lateinit var stateView: TextView
     private lateinit var detailView: TextView
     private lateinit var primaryAction: TextView
+
+    /** "Now serving" rows: id -> (lamp, value). */
+    private val servingViews = LinkedHashMap<String, Pair<View, TextView>>()
+
+    private val sectionBodies = LinkedHashMap<String, LinearLayout>()
+    private val sectionChevrons = LinkedHashMap<String, TextView>()
+
     private lateinit var runtimeTitle: TextView
     private lateinit var runtimeDetail: TextView
     private lateinit var bootValue: TextView
-    private lateinit var updateTitle: TextView
-    private lateinit var updateDetail: TextView
-    private lateinit var updateAction: TextView
-    private lateinit var themeAction: TextView
-    private lateinit var inviteCodeView: TextView
-    private lateinit var inviteSharesView: TextView
-    private lateinit var inviteRedeemRow: Pair<LinearLayout, TextView>
 
     private val superStore by lazy { SuperServerConfigStore(File(filesDir, "grom")) }
     private val secretBox by lazy { AndroidKeystoreSecretBox() }
@@ -104,6 +119,23 @@ class GromActivity : Activity() {
     private lateinit var superRelaysRow: Pair<LinearLayout, TextView>
     private lateinit var superBridgeRow: Pair<LinearLayout, TextView>
     private lateinit var superCopyConfigRow: Pair<LinearLayout, TextView>
+    private lateinit var lightningHealthRow: Pair<LinearLayout, TextView>
+
+    private lateinit var sshList: LinearLayout
+    private var sshAvailable = false
+    private var sshTargets: List<Map<String, Any?>> = emptyList()
+    private var lastSshSignature: String? = null
+
+    private lateinit var projectsList: LinearLayout
+    private var lastProjectsSignature: String? = null
+
+    private lateinit var updateTitle: TextView
+    private lateinit var updateDetail: TextView
+    private lateinit var updateAction: TextView
+
+    private lateinit var inviteCodeView: TextView
+    private lateinit var inviteSharesView: TextView
+    private lateinit var inviteRedeemRow: Pair<LinearLayout, TextView>
 
     private var updateState: UpdateState = UpdateState.Idle
 
@@ -117,12 +149,7 @@ class GromActivity : Activity() {
 
     private val refresher = object : Runnable {
         override fun run() {
-            if (connected) {
-                status = JsonParser.parseObjectOrNull(
-                    client.call("{}") { it.statusJson() }
-                )
-                render()
-            }
+            if (connected) refreshNow()
             handler.postDelayed(this, REFRESH_MS)
         }
     }
@@ -180,19 +207,53 @@ class GromActivity : Activity() {
         column.addView(gap(20))
         column.addView(heroCard())
         column.addView(gap(14))
-        column.addView(runtimeCard())
+        column.addView(servingCard())
 
         if (BuildConfig.GROMSERVER) {
             column.addView(gap(14))
-            column.addView(controlCard())
+            column.addView(
+                sectionCard("runtime", R.string.ui_runtime_section, defaultOpen = false) {
+                    buildRuntimeSection(it)
+                }
+            )
             column.addView(gap(14))
-            column.addView(superCard())
+            column.addView(
+                sectionCard("ssh", R.string.ui_external, defaultOpen = false) {
+                    buildSshSection(it)
+                }
+            )
+            column.addView(gap(14))
+            column.addView(
+                sectionCard("nostr", R.string.ui_nostr_lightning, defaultOpen = false) {
+                    buildNostrSection(it)
+                }
+            )
+            column.addView(gap(14))
+            column.addView(
+                sectionCard("projects", R.string.ui_projects, defaultOpen = false) {
+                    buildProjectsSection(it)
+                }
+            )
+            column.addView(gap(14))
+            column.addView(
+                sectionCard("access", R.string.ui_public_access, defaultOpen = false) {
+                    buildAccessSection(it)
+                }
+            )
         }
 
         column.addView(gap(14))
-        column.addView(updateCard())
+        column.addView(
+            sectionCard("update", R.string.ui_update, defaultOpen = true) {
+                buildUpdateSection(it)
+            }
+        )
         column.addView(gap(14))
-        column.addView(inviteCard())
+        column.addView(
+            sectionCard("invite", R.string.invite_label, defaultOpen = false) {
+                buildInviteSection(it)
+            }
+        )
         column.addView(gap(24))
         column.addView(
             text(
@@ -208,8 +269,6 @@ class GromActivity : Activity() {
             }
         )
 
-        // Edge-to-edge is enforced for targetSdk 35+; older platforms have
-        // already consumed the insets, so this padding is simply zero there.
         scroll.setOnApplyWindowInsetsListener { view, insets ->
             @Suppress("DEPRECATION")
             val top = insets.systemWindowInsetTop
@@ -226,7 +285,7 @@ class GromActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val mark = text("G", 16f, palette.onAccent, android.graphics.Typeface.BOLD, gravity = Gravity.CENTER).apply {
+        val mark = text("G", 16f, palette.onAccent, Typeface.BOLD, gravity = Gravity.CENTER).apply {
             background = shape(palette.accent, 9)
             layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
             includeFontPadding = false
@@ -235,14 +294,22 @@ class GromActivity : Activity() {
         row.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(12), 1) })
 
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(text(getString(R.string.ui_wordmark), 21f, palette.onSurface, android.graphics.Typeface.BOLD, letterSpacing = 0.16f))
+        titles.addView(
+            text(
+                getString(R.string.ui_wordmark),
+                21f,
+                palette.onSurface,
+                Typeface.BOLD,
+                letterSpacing = 0.16f
+            )
+        )
         titles.addView(text(getString(R.string.ui_subtitle), 10f, palette.muted, letterSpacing = 0.12f))
         row.addView(
             titles,
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         )
 
-        themeAction = pill(
+        val themeAction = pill(
             value = GromTheme.mode(this).label,
             textColor = palette.onSurface,
             fill = palette.background,
@@ -264,7 +331,13 @@ class GromActivity : Activity() {
         val card = card(palette, radiusDp = 24)
         card.addView(label(getString(R.string.ui_status), palette))
         card.addView(gap(8))
-        stateView = text(getString(R.string.ui_dash), 34f, palette.onSurface, android.graphics.Typeface.BOLD, letterSpacing = -0.02f)
+        stateView = text(
+            getString(R.string.ui_dash),
+            34f,
+            palette.onSurface,
+            Typeface.BOLD,
+            letterSpacing = -0.02f
+        )
         card.addView(stateView)
         card.addView(gap(6))
         detailView = text("", 14f, palette.muted)
@@ -296,33 +369,90 @@ class GromActivity : Activity() {
         return card
     }
 
-    private fun runtimeCard(): View {
+    private fun servingCard(): View {
         val card = card(palette)
-        card.addView(label(getString(R.string.ui_node_runtime), palette))
-        card.addView(gap(8))
-        runtimeTitle = text(getString(R.string.ui_dash), 20f, palette.onSurface, android.graphics.Typeface.BOLD)
-        card.addView(runtimeTitle)
-        card.addView(gap(4))
-        runtimeDetail = text("", 13f, palette.muted)
-        runtimeDetail.maxLines = 4
-        runtimeDetail.ellipsize = TextUtils.TruncateAt.END
-        card.addView(runtimeDetail)
+        card.addView(label(getString(R.string.ui_serving), palette))
+        card.addView(gap(2))
+        val rows = listOf(
+            "control" to R.string.serve_control,
+            "data" to R.string.serve_data,
+            "bridge" to R.string.serve_bridge,
+            "project" to R.string.serve_project
+        )
+        for ((id, titleRes) in rows) {
+            val (row, dot, value) = servingRow(getString(titleRes), null, Lamp.UNKNOWN, palette)
+            servingViews[id] = dot to value
+            card.addView(row)
+        }
         return card
     }
 
-    private fun controlCard(): View {
+    /**
+     * A card whose header toggles its body. The open state is presentation-only
+     * and is restored from [GromPrefs].
+     */
+    private fun sectionCard(
+        key: String,
+        titleRes: Int,
+        defaultOpen: Boolean,
+        build: (LinearLayout) -> Unit
+    ): LinearLayout {
         val card = card(palette)
-        card.addView(label(getString(R.string.ui_control), palette))
-        card.addView(gap(4))
-        card.addView(actionRow(getString(R.string.ui_restart_agent), getString(R.string.ui_agent), palette) { invoke("restart") { it.restartAgent() } })
-        card.addView(divider(palette))
-        card.addView(actionRow(getString(R.string.ui_reset_quarantine), getString(R.string.ui_policy), palette) { invoke("reset") { it.resetAgent() } })
-        card.addView(divider(palette))
-        card.addView(actionRow(getString(R.string.ui_rotate_token), getString(R.string.ui_rotate), palette) {
-            invoke("rotate") { it.rotateToken() }
-            toast(getString(R.string.toast_token_rotated))
-        })
-        card.addView(divider(palette))
+        val open = GromPrefs.sectionOpen(this, key, defaultOpen)
+        val (header, chevron) = sectionHeader(getString(titleRes), open, palette) {
+            toggleSection(key)
+        }
+        card.addView(header)
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (open) View.VISIBLE else View.GONE
+        }
+        card.addView(body)
+        sectionBodies[key] = body
+        sectionChevrons[key] = chevron
+        build(body)
+        return card
+    }
+
+    private fun toggleSection(key: String) {
+        val body = sectionBodies[key] ?: return
+        val open = body.visibility != View.VISIBLE
+        body.visibility = if (open) View.VISIBLE else View.GONE
+        sectionChevrons[key]?.text = if (open) "\u25BE" else "\u25B8"
+        GromPrefs.setSectionOpen(this, key, open)
+    }
+
+    // ---------------------------------------------------------- section bodies
+
+    private fun buildRuntimeSection(body: LinearLayout) {
+        runtimeTitle = text(getString(R.string.ui_dash), 20f, palette.onSurface, Typeface.BOLD)
+        body.addView(runtimeTitle)
+        body.addView(gap(4))
+        runtimeDetail = text("", 13f, palette.muted)
+        runtimeDetail.maxLines = 4
+        runtimeDetail.ellipsize = TextUtils.TruncateAt.END
+        body.addView(runtimeDetail)
+        body.addView(divider(palette))
+        body.addView(
+            actionRow(getString(R.string.ui_restart_agent), getString(R.string.ui_agent), palette) {
+                invoke("restart") { it.restartAgent() }
+            }
+        )
+        body.addView(divider(palette))
+        body.addView(
+            actionRow(getString(R.string.ui_reset_quarantine), getString(R.string.ui_policy), palette) {
+                invoke("reset") { it.resetAgent() }
+            }
+        )
+        body.addView(divider(palette))
+        body.addView(
+            actionRow(getString(R.string.ui_rotate_token), getString(R.string.ui_rotate), palette) {
+                invoke("rotate") { it.rotateToken() }
+                toast(getString(R.string.toast_token_rotated))
+            }
+        )
+        body.addView(divider(palette))
+
         bootValue = text(
             if (GromPrefs.startOnBoot(this)) getString(R.string.ui_on) else getString(R.string.ui_off),
             13f,
@@ -337,7 +467,11 @@ class GromActivity : Activity() {
             isFocusable = true
             setOnClickListener {
                 GromPrefs.setStartOnBoot(this@GromActivity, !GromPrefs.startOnBoot(this@GromActivity))
-                bootValue.text = if (GromPrefs.startOnBoot(this@GromActivity)) getString(R.string.ui_on) else getString(R.string.ui_off)
+                bootValue.text = if (GromPrefs.startOnBoot(this@GromActivity)) {
+                    getString(R.string.ui_on)
+                } else {
+                    getString(R.string.ui_off)
+                }
             }
             addView(
                 text(getString(R.string.ui_start_on_boot), 15f, palette.onSurface),
@@ -345,62 +479,215 @@ class GromActivity : Activity() {
             )
             addView(bootValue)
         }
-        card.addView(bootRow)
-        return card
+        body.addView(bootRow)
     }
 
-    private fun superCard(): View {
-        val card = card(palette)
-        card.addView(label(getString(R.string.ui_access), palette))
-        card.addView(gap(8))
-        card.addView(
-            text(
-                getString(R.string.access_title),
-                20f,
-                palette.onSurface,
-                android.graphics.Typeface.BOLD
-            )
+    private fun buildSshSection(body: LinearLayout) {
+        body.addView(text(getString(R.string.ssh_hint), 12f, palette.muted))
+        body.addView(gap(8))
+        sshList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(sshList)
+        body.addView(gap(10))
+        body.addView(
+            pill(
+                value = getString(R.string.ssh_add),
+                textColor = palette.onSurface,
+                fill = palette.background,
+                rippleColor = palette.ripple,
+                stroke = palette.border,
+                onClick = { showTargetEditor(null) }
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
         )
-        card.addView(gap(4))
+    }
+
+    private fun buildNostrSection(body: LinearLayout) {
+        superNpubRow = actionRowState(getString(R.string.access_npub), palette) { showNpubDialog() }
+        body.addView(superNpubRow.first)
+        body.addView(divider(palette))
+        superRelaysRow = actionRowState(getString(R.string.access_relays), palette) { showRelaysDialog() }
+        body.addView(superRelaysRow.first)
+        body.addView(divider(palette))
+        superBridgeRow = actionRowState(getString(R.string.access_bridge), palette) { showBridgeDialog() }
+        body.addView(superBridgeRow.first)
+        body.addView(divider(palette))
+        superLightningRow = actionRowState(getString(R.string.access_lightning), palette) {
+            showLightningDialog()
+        }
+        body.addView(superLightningRow.first)
+        body.addView(divider(palette))
+        lightningHealthRow = actionRowState(getString(R.string.lightning_health), palette) {
+            probeLightning()
+        }
+        body.addView(lightningHealthRow.first)
+    }
+
+    private fun buildProjectsSection(body: LinearLayout) {
+        body.addView(text(getString(R.string.projects_hint), 12f, palette.muted))
+        body.addView(gap(8))
+        projectsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(projectsList)
+    }
+
+    private fun buildAccessSection(body: LinearLayout) {
         superDetail = text("", 13f, palette.muted)
         superDetail.maxLines = 4
         superDetail.ellipsize = TextUtils.TruncateAt.END
-        card.addView(superDetail)
-        card.addView(gap(4))
-
+        body.addView(superDetail)
+        body.addView(gap(4))
         superEnableRow = actionRowState(getString(R.string.access_enable), palette) { toggleSuperEnabled() }
-        card.addView(superEnableRow.first)
-        card.addView(divider(palette))
+        body.addView(superEnableRow.first)
+        body.addView(divider(palette))
         superBindRow = actionRowState(getString(R.string.access_bind), palette) { cycleBindMode() }
-        card.addView(superBindRow.first)
-        card.addView(divider(palette))
+        body.addView(superBindRow.first)
+        body.addView(divider(palette))
         superAuthRow = actionRowState(getString(R.string.access_auth), palette) { cycleAuthMode() }
-        card.addView(superAuthRow.first)
-        card.addView(divider(palette))
+        body.addView(superAuthRow.first)
+        body.addView(divider(palette))
         superPasswordRow = actionRowState(getString(R.string.access_password), palette) { showPasswordDialog() }
-        card.addView(superPasswordRow.first)
-        card.addView(divider(palette))
+        body.addView(superPasswordRow.first)
+        body.addView(divider(palette))
         superKeysRow = actionRowState(getString(R.string.access_keys), palette) { showKeysDialog() }
-        card.addView(superKeysRow.first)
-        card.addView(divider(palette))
-        superLightningRow = actionRowState(getString(R.string.access_lightning), palette) { showLightningDialog() }
-        card.addView(superLightningRow.first)
-        card.addView(divider(palette))
-        superNpubRow = actionRowState(getString(R.string.access_npub), palette) { showNpubDialog() }
-        card.addView(superNpubRow.first)
-        card.addView(divider(palette))
-        superRelaysRow = actionRowState(getString(R.string.access_relays), palette) { showRelaysDialog() }
-        card.addView(superRelaysRow.first)
-        card.addView(divider(palette))
-        superBridgeRow = actionRowState(getString(R.string.access_bridge), palette) { showBridgeDialog() }
-        card.addView(superBridgeRow.first)
-        card.addView(divider(palette))
+        body.addView(superKeysRow.first)
+        body.addView(divider(palette))
         superCopyConfigRow = actionRowState(getString(R.string.access_copy_config), palette) {
             copyConfigToClipboard()
         }
-        card.addView(superCopyConfigRow.first)
-        return card
+        body.addView(superCopyConfigRow.first)
     }
+
+    private fun buildUpdateSection(body: LinearLayout) {
+        updateTitle = text(
+            getString(R.string.update_updates),
+            20f,
+            palette.onSurface,
+            Typeface.BOLD
+        )
+        body.addView(updateTitle)
+        body.addView(gap(4))
+        updateDetail = text(getString(R.string.update_installed, BuildConfig.VERSION_NAME), 13f, palette.muted)
+        updateDetail.maxLines = 4
+        updateDetail.ellipsize = TextUtils.TruncateAt.END
+        body.addView(updateDetail)
+        body.addView(gap(14))
+        updateAction = pill(
+            value = getString(R.string.update_check_now),
+            textColor = palette.onSurface,
+            fill = palette.background,
+            rippleColor = palette.ripple,
+            stroke = palette.border,
+            onClick = {
+                val current = updateState
+                if (current is UpdateState.Available) {
+                    openUrl(current.release.apkUrl ?: current.release.htmlUrl)
+                } else {
+                    checkForUpdates()
+                }
+            }
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        body.addView(updateAction)
+    }
+
+    private fun buildInviteSection(body: LinearLayout) {
+        body.addView(
+            text(getString(R.string.invite_detail), 13f, palette.muted).apply {
+                maxLines = 3
+                ellipsize = TextUtils.TruncateAt.END
+            }
+        )
+        body.addView(gap(12))
+
+        val codePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = shape(palette.background, 14, palette.border)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        codePanel.addView(
+            text(
+                getString(R.string.invite_your_code).uppercase(java.util.Locale.ROOT),
+                10f,
+                palette.muted,
+                Typeface.BOLD,
+                letterSpacing = 0.16f
+            )
+        )
+        codePanel.addView(gap(4))
+        inviteCodeView = text(
+            getString(R.string.ui_dash),
+            26f,
+            palette.onSurface,
+            Typeface.BOLD,
+            letterSpacing = 0.28f
+        )
+        codePanel.addView(inviteCodeView)
+        codePanel.addView(gap(2))
+        inviteSharesView = text("", 11f, palette.muted)
+        codePanel.addView(inviteSharesView)
+        body.addView(codePanel)
+        body.addView(gap(12))
+
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val copy = pill(
+            value = getString(R.string.invite_copy_link),
+            textColor = palette.onAccent,
+            fill = palette.accent,
+            rippleColor = palette.ripple
+        ) { copyInviteLink() }
+        val share = pill(
+            value = getString(R.string.invite_share),
+            textColor = palette.onSurface,
+            fill = palette.background,
+            rippleColor = palette.ripple,
+            stroke = palette.border
+        ) { shareInvite() }
+        actions.addView(
+            copy,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { setMargins(0, 0, dp(5), 0) }
+        )
+        actions.addView(
+            share,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { setMargins(dp(5), 0, 0, 0) }
+        )
+        body.addView(actions)
+        body.addView(gap(12))
+        body.addView(
+            text(
+                getString(R.string.invite_rewards).uppercase(java.util.Locale.ROOT),
+                11f,
+                palette.muted,
+                Typeface.BOLD,
+                letterSpacing = 0.14f
+            ).apply {
+                background = shape(palette.background, 999, palette.border)
+                setPadding(dp(12), dp(7), dp(12), dp(7))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+        )
+        body.addView(gap(6))
+        body.addView(text(getString(R.string.invite_rewards_detail), 12f, palette.muted))
+        body.addView(gap(6))
+        body.addView(divider(palette))
+        inviteRedeemRow = actionRowState(getString(R.string.invite_redeem), palette) {
+            showRedeemDialog()
+        }
+        body.addView(inviteRedeemRow.first)
+    }
+
+    // ------------------------------------------------------------ super config
 
     private fun renderSuper() {
         val superStatus = status?.get("super") as? Map<*, *>
@@ -461,6 +748,14 @@ class GromActivity : Activity() {
             ?.takeIf { it.isNotBlank() }
             ?: getString(R.string.access_bridge_none)
         superCopyConfigRow.second.text = ""
+
+        val health = superStatus?.get("lightningHealth") as? Map<*, *>
+        val reachable = health?.get("reachable") as? Boolean
+        lightningHealthRow.second.text = when (reachable) {
+            true -> getString(R.string.lightning_reachable)
+            false -> getString(R.string.lightning_unreachable)
+            null -> getString(R.string.lightning_not_probed)
+        }
     }
 
     private fun toggleSuperEnabled() {
@@ -509,7 +804,6 @@ class GromActivity : Activity() {
         persistSuperConfig(superConfig.copy(auth = next))
     }
 
-    /** Writes the configuration and asks the running server to rebuild the listener. */
     private fun persistSuperConfig(updated: SuperServerConfig) {
         val previous = superConfig
         superConfig = updated
@@ -530,9 +824,7 @@ class GromActivity : Activity() {
             toast(failure.message ?: getString(R.string.access_reload_failed))
             false
         }
-        toast(
-            getString(if (reloaded) R.string.access_saved else R.string.access_reload_failed)
-        )
+        toast(getString(if (reloaded) R.string.access_saved else R.string.access_reload_failed))
         handler.postDelayed({ refreshNow() }, 300)
         renderSuper()
     }
@@ -583,31 +875,25 @@ class GromActivity : Activity() {
         val publicKey = Ed25519.derivePublicKey(seed)
         val keyId = Ed25519.keyId(publicKey)
         val encoded = Base64.getEncoder().encodeToString(publicKey)
-        val key = app.grom.server.superserver.ApiKeyConfig(
-            keyId = keyId,
-            label = "operator",
-            publicKey = encoded
-        )
+        val key = ApiKeyConfig(keyId = keyId, label = "operator", publicKey = encoded)
         persistSuperConfig(superConfig.copy(keys = superConfig.keys + key))
         showSeedDialog(seed, keyId)
     }
 
     private fun showSeedDialog(seed: ByteArray, keyId: String) {
-        val text = Base64.getUrlEncoder().withoutPadding().encodeToString(seed)
+        val seedText = Base64.getUrlEncoder().withoutPadding().encodeToString(seed)
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_key_seed_title)
-            .setMessage(getString(R.string.dialog_key_seed_body, text, keyId))
+            .setMessage(getString(R.string.dialog_key_seed_body, seedText, keyId))
             .setPositiveButton(R.string.dialog_key_copy) { _, _ ->
-                val clipboard = getSystemService(ClipboardManager::class.java)
-                clipboard?.setPrimaryClip(ClipData.newPlainText("grom-key", text))
-                toast(getString(R.string.toast_key_copied))
+                copyText(seedText, R.string.toast_key_copied)
             }
             .setNegativeButton(R.string.dialog_close, null)
             .show()
     }
 
     private fun showLightningDialog() {
-        val column = LinearLayout(this).apply {
+        val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(4), dp(20), 0)
         }
@@ -621,12 +907,12 @@ class GromActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine()
         }
-        column.addView(url)
-        column.addView(apiKey)
+        container.addView(url)
+        container.addView(apiKey)
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_lightning_title)
             .setMessage(R.string.dialog_lightning_hint)
-            .setView(column)
+            .setView(container)
             .setPositiveButton(R.string.dialog_save) { _, _ ->
                 val base = url.text.toString().trim()
                 if (!base.startsWith("https://")) {
@@ -656,11 +942,31 @@ class GromActivity : Activity() {
             .show()
     }
 
-    /**
-     * Reference Nostr key (D52). Validation runs before the dialog closes, so a
-     * typo cannot be persisted; a valid hex key is stored in its canonical
-     * `npub1…` form.
-     */
+    private fun probeLightning() {
+        val server = client.server
+        if (server == null) {
+            toast(getString(R.string.toast_not_bound, getString(R.string.lightning_probe_now)))
+            return
+        }
+        toast(getString(R.string.lightning_probing))
+        Thread({
+            val raw = runCatching { server.lightningProbeJson() }.getOrNull()
+            val parsed = raw?.let { JsonParser.parseObjectOrNull(it) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (parsed?.get("ok") == true) {
+                    toast(getString(R.string.lightning_probe_ok))
+                } else {
+                    val code = parsed?.get("code") as? String
+                        ?: parsed?.get("message") as? String
+                        ?: getString(R.string.lightning_not_probed)
+                    toast(getString(R.string.lightning_probe_failed, code))
+                }
+                refreshNow()
+            }
+        }, "grom-lightning-probe").start()
+    }
+
     private fun showNpubDialog() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT
@@ -693,11 +999,6 @@ class GromActivity : Activity() {
             .show()
     }
 
-    /**
-     * Reference relay list (D52). Grom never dials these URLs; the list is a
-     * hand-off for an external bridge. The Add button is intercepted so the
-     * dialog stays open while the operator builds the list.
-     */
     private fun showRelaysDialog() {
         val working = ArrayList(superConfig.relays)
         val column = LinearLayout(this).apply {
@@ -736,9 +1037,7 @@ class GromActivity : Activity() {
                 row.addView(
                     text(getString(R.string.dialog_relay_copy), 11f, palette.muted).apply {
                         setPadding(dp(8), dp(6), dp(8), dp(6))
-                        setOnClickListener {
-                            copyText(relay, R.string.toast_relay_copied)
-                        }
+                        setOnClickListener { copyText(relay, R.string.toast_relay_copied) }
                     }
                 )
                 row.addView(
@@ -800,7 +1099,6 @@ class GromActivity : Activity() {
         dialog.show()
     }
 
-    /** Free-text label for a tunnel the operator runs elsewhere (D52, D54). */
     private fun showBridgeDialog() {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -844,11 +1142,6 @@ class GromActivity : Activity() {
             .show()
     }
 
-    /**
-     * Copies the sanitised hand-off document (D53). It is built from the local
-     * config and the measured Lightning health in `status`; it never contains a
-     * password hash, key material or a sealed backend credential.
-     */
     private fun copyConfigToClipboard() {
         val superStatus = status?.get("super") as? Map<*, *>
         val lightningRaw = superStatus?.get("lightningHealth") as? Map<*, *>
@@ -856,8 +1149,18 @@ class GromActivity : Activity() {
             ?.filter { it.key is String }
             ?.associate { it.key as String to it.value }
             ?: emptyMap()
+        val projects = (status?.get("projects") as? List<*>)
+            ?.mapNotNull { it as? Map<*, *> }
+            ?.map { it.entries.filter { entry -> entry.key is String }
+                .associate { entry -> entry.key as String to entry.value } }
+            ?: emptyList()
+        val bridge = (superStatus?.get("bridge") as? Map<*, *>)
+            ?.entries
+            ?.filter { it.key is String }
+            ?.associate { it.key as String to it.value }
+            ?: emptyMap()
         copyText(
-            ConfigExport.render(superConfig, lightning),
+            ConfigExport.render(superConfig, lightning, projects, bridge),
             R.string.toast_config_copied
         )
     }
@@ -872,156 +1175,525 @@ class GromActivity : Activity() {
         toast(getString(toastRes))
     }
 
-    private fun updateCard(): View {
-        val card = card(palette)
-        card.addView(label(getString(R.string.ui_update), palette))
-        card.addView(gap(8))
-        updateTitle = text(getString(R.string.update_updates), 20f, palette.onSurface, android.graphics.Typeface.BOLD)
-        card.addView(updateTitle)
-        card.addView(gap(4))
-        updateDetail = text(getString(R.string.update_installed, BuildConfig.VERSION_NAME), 13f, palette.muted)
-        updateDetail.maxLines = 4
-        updateDetail.ellipsize = TextUtils.TruncateAt.END
-        card.addView(updateDetail)
-        card.addView(gap(14))
-        updateAction = pill(
-            value = getString(R.string.update_check_now),
+    // -------------------------------------------------------------- SSH bridge
+
+    private fun renderSsh() {
+        if (!::sshList.isInitialized) return
+        val signature = buildString {
+            append(sshAvailable)
+            for (target in sshTargets) {
+                append('|').append(target["id"]).append(':').append(target["state"])
+            }
+        }
+        if (signature == lastSshSignature) return
+        lastSshSignature = signature
+        sshList.removeAllViews()
+
+        if (!sshAvailable) {
+            sshList.addView(text(getString(R.string.ssh_unavailable), 12f, palette.negative))
+            return
+        }
+        if (sshTargets.isEmpty()) {
+            sshList.addView(text(getString(R.string.ssh_none), 12f, palette.muted))
+            return
+        }
+        for (target in sshTargets) {
+            sshList.addView(sshRow(target))
+            sshList.addView(divider(palette))
+        }
+    }
+
+    private fun sshRow(target: Map<String, Any?>): View {
+        val state = (target["state"] as? String) ?: "disconnected"
+        val lamp = when (state) {
+            "connected" -> Lamp.ON
+            "connecting" -> Lamp.UNKNOWN
+            "failed" -> Lamp.OFF
+            else -> Lamp.UNKNOWN
+        }
+        val dot = lampView(lamp, palette)
+        val labelText = (target["label"] as? String) ?: (target["id"] as? String) ?: ""
+        val user = (target["username"] as? String) ?: ""
+        val host = (target["host"] as? String) ?: ""
+        val port = (target["port"] as? Number)?.toInt() ?: 22
+
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        column.addView(text(labelText, 15f, palette.onSurface, Typeface.BOLD))
+        column.addView(
+            text(
+                getString(R.string.ssh_row_detail, user, host, port),
+                12f,
+                palette.muted
+            )
+        )
+        column.addView(text(sshStateLabel(state), 11f, stateColour(state)))
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showTargetDialog(target) }
+            addView(dot)
+            addView(
+                column,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            addView(text("\u203A", 20f, palette.muted))
+        }
+        return row
+    }
+
+    private fun sshStateLabel(state: String): String = when (state) {
+        "connected" -> getString(R.string.ssh_state_connected)
+        "connecting" -> getString(R.string.ssh_state_connecting)
+        "failed" -> getString(R.string.ssh_state_failed)
+        else -> getString(R.string.ssh_state_disconnected)
+    }
+
+    private fun stateColour(state: String): Int = when (state) {
+        "connected" -> palette.positive
+        "failed" -> palette.negative
+        else -> palette.muted
+    }
+
+    private fun showTargetDialog(target: Map<String, Any?>) {
+        val id = target["id"] as? String ?: return
+        val connected = target["state"] == "connected"
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val user = (target["username"] as? String) ?: ""
+        val host = (target["host"] as? String) ?: ""
+        val port = (target["port"] as? Number)?.toInt() ?: 22
+        column.addView(
+            text(
+                getString(R.string.ssh_row_detail, user, host, port) +
+                    " \u00b7 " + sshStateLabel((target["state"] as? String) ?: "disconnected"),
+                13f,
+                palette.muted
+            )
+        )
+        val pinned = target["hostKeySha256"] as? String
+        if (!pinned.isNullOrBlank()) {
+            column.addView(gap(6))
+            column.addView(text(pinned, 10f, palette.muted))
+        }
+        column.addView(gap(12))
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle((target["label"] as? String) ?: getString(R.string.ui_external))
+            .setView(column)
+            .setNegativeButton(R.string.ssh_action_close, null)
+            .create()
+
+        fun addAction(textRes: Int, primary: Boolean, action: () -> Unit) {
+            val button = pill(
+                value = getString(textRes),
+                textColor = if (primary) palette.onAccent else palette.onSurface,
+                fill = if (primary) palette.accent else palette.background,
+                rippleColor = palette.ripple,
+                stroke = if (primary) null else palette.border,
+                onClick = {
+                    dialog.dismiss()
+                    action()
+                }
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 0, 0, dp(8)) }
+            }
+            column.addView(button)
+        }
+
+        if (connected) {
+            addAction(R.string.ssh_action_disconnect, primary = true) { disconnectTarget(id) }
+        } else {
+            addAction(R.string.ssh_action_connect, primary = true) { connectTarget(id, null) }
+        }
+        val publicLine = target["publicKeyLine"] as? String
+        if (!publicLine.isNullOrBlank()) {
+            addAction(R.string.ssh_action_copy_key, primary = false) {
+                copyText(publicLine, R.string.ssh_public_key_copied)
+            }
+        }
+        addAction(R.string.ssh_action_edit, primary = false) { showTargetEditor(target) }
+        if (!pinned.isNullOrBlank()) {
+            addAction(R.string.ssh_action_clear_pin, primary = false) { clearPin(id) }
+        }
+        addAction(R.string.ssh_action_delete, primary = false) { confirmDeleteTarget(id) }
+        dialog.show()
+    }
+
+    private fun connectTarget(id: String, trustFingerprint: String?) {
+        val server = client.server
+        if (server == null) {
+            toast(getString(R.string.toast_not_bound, getString(R.string.ssh_action_connect)))
+            return
+        }
+        toast(getString(R.string.ssh_connecting))
+        Thread({
+            val raw = runCatching { server.sshConnect(id, trustFingerprint) }.getOrNull()
+            val parsed = raw?.let { JsonParser.parseObjectOrNull(it) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when {
+                    parsed?.get("ok") == true -> {
+                        toast(getString(R.string.ssh_connected))
+                        refreshNow()
+                    }
+                    parsed?.get("code") == "HOST_KEY_UNVERIFIED" -> {
+                        val fingerprint = parsed["fingerprint"] as? String
+                        if (fingerprint != null) confirmHostKey(id, fingerprint)
+                    }
+                    parsed?.get("code") == "HOST_KEY_MISMATCH" -> {
+                        confirmHostKeyChange(
+                            id,
+                            parsed["pinned"] as? String,
+                            parsed["fingerprint"] as? String
+                        )
+                    }
+                    else -> {
+                        val code = parsed?.get("code") as? String
+                            ?: parsed?.get("message") as? String
+                            ?: getString(R.string.ssh_state_failed)
+                        toast(getString(R.string.ssh_error, code))
+                        refreshNow()
+                    }
+                }
+            }
+        }, "grom-ssh-connect").start()
+    }
+
+    private fun confirmHostKey(id: String, fingerprint: String) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.ssh_confirm_title)
+            .setMessage(getString(R.string.ssh_confirm_body, fingerprint))
+            .setPositiveButton(R.string.ssh_confirm_action) { _, _ ->
+                connectTarget(id, fingerprint)
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun confirmHostKeyChange(id: String, pinned: String?, observed: String?) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.ssh_mismatch_title)
+            .setMessage(
+                getString(
+                    R.string.ssh_mismatch_body,
+                    pinned ?: "\u2014",
+                    observed ?: "\u2014"
+                )
+            )
+            .setPositiveButton(R.string.ssh_mismatch_action) { _, _ ->
+                clearPin(id)
+                connectTarget(id, null)
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun disconnectTarget(id: String) {
+        val server = client.server ?: return
+        Thread({
+            runCatching { server.sshDisconnect(id) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                toast(getString(R.string.ssh_disconnected))
+                refreshNow()
+            }
+        }, "grom-ssh-disconnect").start()
+    }
+
+    private fun clearPin(id: String) {
+        val server = client.server ?: return
+        Thread({
+            runCatching { server.sshClearPin(id) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                refreshNow()
+            }
+        }, "grom-ssh-pin").start()
+    }
+
+    private fun confirmDeleteTarget(id: String) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.ssh_delete_title)
+            .setMessage(R.string.ssh_delete_body)
+            .setPositiveButton(R.string.ssh_delete_action) { _, _ ->
+                val server = client.server ?: return@setPositiveButton
+                Thread({
+                    runCatching { server.sshDeleteTarget(id) }
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        refreshNow()
+                    }
+                }, "grom-ssh-delete").start()
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    /**
+     * Add/edit dialog. The private key is never shown again after save; a
+     * generated key is shown as its public line, and the private half is sealed
+     * by the service when the draft is stored.
+     */
+    private fun showTargetEditor(existing: Map<String, Any?>?) {
+        var auth = (existing?.get("auth") as? String)?.let { wire ->
+            if (wire == "password") "password" else "key"
+        } ?: "key"
+        val existingAuth = existing?.get("auth") as? String
+        var generatedPrivate: String? = null
+        var publicLine = existing?.get("publicKeyLine") as? String
+
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), 0)
+        }
+        fun field(hintRes: Int, value: String?): EditText = EditText(this).apply {
+            hint = getString(hintRes)
+            setSingleLine()
+            if (value != null) setText(value)
+        }
+
+        val labelInput = field(R.string.ssh_field_label, existing?.get("label") as? String)
+        val hostInput = field(R.string.ssh_field_host, existing?.get("host") as? String)
+        val portInput = field(
+            R.string.ssh_field_port,
+            ((existing?.get("port") as? Number)?.toInt() ?: 22).toString()
+        )
+        val forwardInput = field(
+            R.string.ssh_field_forward,
+            ((existing?.get("forwardPort") as? Number)?.toInt() ?: 47002).toString()
+        )
+        val userInput = field(R.string.ssh_field_user, existing?.get("username") as? String)
+        val passwordInput = EditText(this).apply {
+            hint = getString(R.string.ssh_field_password)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        val privateKeyInput = EditText(this).apply {
+            hint = getString(R.string.ssh_private_key_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(false)
+            minLines = 3
+        }
+        val publicText = text(
+            publicLine?.takeIf { it.isNotBlank() } ?: getString(R.string.ssh_public_line),
+            10f,
+            palette.muted
+        )
+        val noteText = text("", 10f, palette.muted)
+
+        val authPill = pill(
+            value = if (auth == "key") getString(R.string.ssh_auth_key) else getString(R.string.ssh_auth_password),
             textColor = palette.onSurface,
             fill = palette.background,
             rippleColor = palette.ripple,
             stroke = palette.border,
-            onClick = {
-                val current = updateState
-                if (current is UpdateState.Available) {
-                    openUrl(current.release.apkUrl ?: current.release.htmlUrl)
-                } else {
-                    checkForUpdates()
-                }
-            }
-        ).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        card.addView(updateAction)
-        return card
-    }
+            onClick = {}
+        )
 
-    /**
-     * Invite & Earn (D50). The code is generated on this device and never
-     * uploaded; there is no referrer service to check it against. The rewards
-     * badge says what is true: nothing has shipped, and nothing is paid.
-     */
-    private fun inviteCard(): View {
-        val card = card(palette)
-        card.addView(label(getString(R.string.invite_label), palette))
-        card.addView(gap(8))
-        card.addView(
-            text(
-                getString(R.string.invite_title),
-                20f,
-                palette.onSurface,
-                android.graphics.Typeface.BOLD
-            )
-        )
-        card.addView(gap(4))
-        card.addView(
-            text(getString(R.string.invite_detail), 13f, palette.muted).apply {
-                maxLines = 3
-                ellipsize = TextUtils.TruncateAt.END
-            }
-        )
-        card.addView(gap(14))
-
-        val codePanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = shape(palette.background, 14, palette.border)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-        }
-        codePanel.addView(
-            text(
-                getString(R.string.invite_your_code).uppercase(java.util.Locale.ROOT),
-                10f,
-                palette.muted,
-                android.graphics.Typeface.BOLD,
-                letterSpacing = 0.16f
-            )
-        )
-        codePanel.addView(gap(4))
-        inviteCodeView = text(
-            getString(R.string.ui_dash),
-            26f,
-            palette.onSurface,
-            android.graphics.Typeface.BOLD,
-            letterSpacing = 0.28f
-        )
-        codePanel.addView(inviteCodeView)
-        codePanel.addView(gap(2))
-        inviteSharesView = text("", 11f, palette.muted)
-        codePanel.addView(inviteSharesView)
-        card.addView(codePanel)
-        card.addView(gap(12))
-
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val copy = pill(
-            value = getString(R.string.invite_copy_link),
-            textColor = palette.onAccent,
-            fill = palette.accent,
-            rippleColor = palette.ripple
-        ) { copyInviteLink() }
-        val share = pill(
-            value = getString(R.string.invite_share),
+        val generatePill = pill(
+            value = getString(R.string.ssh_generate),
             textColor = palette.onSurface,
             fill = palette.background,
             rippleColor = palette.ripple,
-            stroke = palette.border
-        ) { shareInvite() }
-        actions.addView(
-            copy,
-            LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            ).apply { setMargins(0, 0, dp(5), 0) }
+            stroke = palette.border,
+            onClick = {}
         )
-        actions.addView(
-            share,
-            LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            ).apply { setMargins(dp(5), 0, 0, 0) }
-        )
-        card.addView(actions)
-        card.addView(gap(12))
 
-        card.addView(
-            text(
-                getString(R.string.invite_rewards).uppercase(java.util.Locale.ROOT),
-                11f,
-                palette.muted,
-                android.graphics.Typeface.BOLD,
-                letterSpacing = 0.14f
-            ).apply {
-                background = shape(palette.background, 999, palette.border)
-                setPadding(dp(12), dp(7), dp(12), dp(7))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
+        // Local visibility helper; `auth` changes through the pill's listener.
+        fun refreshAuthUi() {
+            authPill.text = if (auth == "key") {
+                getString(R.string.ssh_auth_key)
+            } else {
+                getString(R.string.ssh_auth_password)
+            }
+            passwordInput.visibility = if (auth == "password") View.VISIBLE else View.GONE
+            privateKeyInput.visibility = if (auth == "key") View.VISIBLE else View.GONE
+            generatePill.visibility = if (auth == "key") View.VISIBLE else View.GONE
+            publicText.visibility = if (auth == "key") View.VISIBLE else View.GONE
+            noteText.visibility = if (auth == "key") View.VISIBLE else View.GONE
+            noteText.text = if (auth == "key") {
+                getString(R.string.ssh_key_private_note)
+            } else {
+                ""
+            }
+        }
+        authPill.setOnClickListener {
+            auth = if (auth == "key") "password" else "key"
+            refreshAuthUi()
+        }
+        generatePill.setOnClickListener {
+            val server = client.server ?: return@setOnClickListener
+            Thread({
+                val raw = runCatching { server.sshGenerateKeyJson() }.getOrNull()
+                val parsed = raw?.let { JsonParser.parseObjectOrNull(it) }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (parsed?.get("ok") == true) {
+                        generatedPrivate = parsed["privateKeyText"] as? String
+                        publicLine = parsed["publicKeyLine"] as? String
+                        privateKeyInput.setText("")
+                        publicText.text = publicLine ?: getString(R.string.ssh_public_line)
+                        toast(getString(R.string.ssh_key_generated))
+                    } else {
+                        toast(getString(R.string.ssh_key_generate_failed))
+                    }
+                }
+            }, "grom-ssh-keygen").start()
+        }
+
+        column.addView(labelInput)
+        column.addView(hostInput)
+        column.addView(portInput)
+        column.addView(userInput)
+        column.addView(authPill)
+        column.addView(passwordInput)
+        column.addView(privateKeyInput)
+        column.addView(generatePill)
+        column.addView(publicText)
+        column.addView(noteText)
+        column.addView(forwardInput)
+        column.addView(text(getString(R.string.ssh_forward_note), 10f, palette.muted))
+        refreshAuthUi()
+
+        val scroll = ScrollView(this).apply { addView(column) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(
+                if (existing == null) R.string.dialog_ssh_add else R.string.dialog_ssh_edit
+            )
+            .setView(scroll)
+            .setPositiveButton(R.string.dialog_save, null)
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val id = existing?.get("id") as? String
+                val privateText = when {
+                    auth != "key" -> null
+                    !generatedPrivate.isNullOrBlank() -> generatedPrivate
+                    privateKeyInput.text.isNotBlank() -> privateKeyInput.text.toString()
+                    else -> null
+                }
+                val unchangedAuth = existing != null && existingAuth == auth &&
+                    existing["configured"] == true
+                if (auth == "key" && privateText == null && !unchangedAuth) {
+                    toast(getString(R.string.ssh_key_required))
+                    return@setOnClickListener
+                }
+                if (auth == "password" && passwordInput.text.isBlank() && !unchangedAuth) {
+                    toast(getString(R.string.ssh_password_required))
+                    return@setOnClickListener
+                }
+                val draft = linkedMapOf<String, Any?>(
+                    "label" to labelInput.text.toString(),
+                    "host" to hostInput.text.toString(),
+                    "port" to (portInput.text.toString().toIntOrNull() ?: 22),
+                    "username" to userInput.text.toString(),
+                    "auth" to auth,
+                    "forwardPort" to (forwardInput.text.toString().toIntOrNull() ?: 47002),
+                    "enabled" to true
+                )
+                if (id != null) draft["id"] = id
+                if (privateText != null) draft["privateKey"] = privateText
+                if (auth == "password" && passwordInput.text.isNotBlank()) {
+                    draft["password"] = passwordInput.text.toString()
+                }
+                saveTarget(draft)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun saveTarget(draft: Map<String, Any?>) {
+        val server = client.server
+        if (server == null) {
+            toast(getString(R.string.toast_not_bound, getString(R.string.ssh_add)))
+            return
+        }
+        val body = Json.encode(draft)
+        Thread({
+            val outcome = runCatching { server.sshSaveTarget(body) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                outcome.fold(
+                    onSuccess = {
+                        toast(getString(R.string.ssh_saved))
+                        refreshNow()
+                    },
+                    onFailure = { failure ->
+                        toast(
+                            failure.message?.removePrefix("GROM_E_")
+                                ?: getString(R.string.ssh_state_failed)
+                        )
+                    }
                 )
             }
-        )
-        card.addView(gap(6))
-        card.addView(text(getString(R.string.invite_rewards_detail), 12f, palette.muted))
+        }, "grom-ssh-save").start()
+    }
 
-        card.addView(gap(6))
-        card.addView(divider(palette))
-        inviteRedeemRow = actionRowState(getString(R.string.invite_redeem), palette) {
-            showRedeemDialog()
+    // --------------------------------------------------------------- projects
+
+    private fun renderProjects() {
+        if (!::projectsList.isInitialized) return
+        val list = (status?.get("projects") as? List<*>)
+            ?.mapNotNull { it as? Map<*, *> }
+            ?: emptyList()
+        val signature = list.joinToString("|") {
+            "${it["id"]}:${it["state"]}:${it["title"]}"
         }
-        card.addView(inviteRedeemRow.first)
-        return card
+        if (signature == lastProjectsSignature) return
+        lastProjectsSignature = signature
+        projectsList.removeAllViews()
+
+        if (list.isEmpty()) {
+            projectsList.addView(text(getString(R.string.projects_empty), 12f, palette.muted))
+            return
+        }
+        for (project in list) {
+            val alive = project["state"] == "alive"
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(8), 0, dp(8))
+                addView(lampView(if (alive) Lamp.ON else Lamp.OFF, palette))
+            }
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val title = (project["title"] as? String) ?: (project["id"] as? String) ?: ""
+            val version = (project["version"] as? String).orEmpty()
+            column.addView(
+                text(
+                    if (version.isBlank()) title else "$title $version",
+                    14f,
+                    palette.onSurface,
+                    Typeface.BOLD
+                )
+            )
+            column.addView(
+                text(
+                    if (alive) getString(R.string.project_alive)
+                    else getString(R.string.project_stale),
+                    11f,
+                    if (alive) palette.positive else palette.negative
+                )
+            )
+            row.addView(
+                column,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            projectsList.addView(row)
+        }
+        projectsList.addView(gap(4))
+        projectsList.addView(text(getString(R.string.project_embedded_note), 10f, palette.muted))
     }
 
     // --------------------------------------------------------------- behaviour
@@ -1056,6 +1728,7 @@ class GromActivity : Activity() {
         client.unbind()
         connected = false
         status = null
+        sshTargets = emptyList()
         stopService(Intent(this, app.grom.server.service.GromService::class.java))
         render()
     }
@@ -1063,6 +1736,13 @@ class GromActivity : Activity() {
     private fun refreshNow() {
         if (!connected) return
         status = JsonParser.parseObjectOrNull(client.call("{}") { it.statusJson() })
+        val ssh = JsonParser.parseObjectOrNull(client.call("{}") { it.sshStatusJson() })
+        sshAvailable = ssh?.get("available") == true
+        sshTargets = (ssh?.get("targets") as? List<*>)
+            ?.mapNotNull { it as? Map<*, *> }
+            ?.map { raw -> raw.entries.filter { it.key is String }
+                .associate { it.key as String to it.value } }
+            ?: emptyList()
         render()
     }
 
@@ -1088,70 +1768,85 @@ class GromActivity : Activity() {
     // -------------------------------------------------------------------- render
 
     private fun render() {
-        if (BuildConfig.GROMSERVER) renderSuper()
-        val state = state()
-        val runtimePresent = status?.get("runtime") == "node"
-        val pid = number("pid")
+        if (BuildConfig.GROMSERVER) {
+            renderSuper()
+            renderSsh()
+            renderProjects()
+        }
+        val dashboard = DashboardModel.build(status)
+        renderServing(dashboard)
 
         if (!BuildConfig.GROMSERVER) {
             stateView.text = getString(R.string.state_peripheral)
             stateView.setTextColor(palette.onSurface)
             detailView.text = getString(R.string.detail_peripheral)
-            runtimeTitle.text = getString(R.string.runtime_not_applicable)
-            runtimeDetail.text = getString(R.string.runtime_install_server_role)
             return
         }
-
         if (!connected) {
             stateView.text = getString(R.string.state_offline)
             stateView.setTextColor(palette.onSurface)
             detailView.text = disconnectReason?.let { getString(R.string.detail_ipc_reason, it) }
                 ?: getString(R.string.detail_ipc_unbound)
-            runtimeTitle.text = getString(R.string.runtime_unknown)
-            runtimeDetail.text = getString(R.string.runtime_start_to_inspect)
             primaryAction.text = getString(R.string.action_start)
+            renderRuntimeSection()
             return
         }
 
-        when (state) {
-            "READY" -> {
-                stateView.text = getString(R.string.state_running)
-                stateView.setTextColor(palette.positive)
-                detailView.text = if (number("agentPort") > 0) {
-                    getString(R.string.detail_address_agent, number("port"), number("agentPort"))
-                } else {
-                    getString(R.string.detail_address, number("port"))
-                }
-            }
-            "STARTING" -> {
-                stateView.text = getString(R.string.state_starting)
-                stateView.setTextColor(palette.onSurface)
-                detailView.text = getString(R.string.detail_starting)
-            }
-            "MISSING_RUNTIME" -> {
-                stateView.text = getString(R.string.state_runtime_missing)
-                stateView.setTextColor(palette.negative)
-                detailView.text = getString(R.string.detail_runtime_missing)
-            }
-            "QUARANTINED" -> {
-                stateView.text = getString(R.string.state_quarantined)
-                stateView.setTextColor(palette.negative)
-                detailView.text = status?.get("quarantineReason")
-                    ?.toString()?.takeIf { it.isNotEmpty() }
-                    ?: getString(R.string.detail_quarantine_default)
-            }
-            "STOPPED" -> {
-                stateView.text = getString(R.string.state_stopped)
-                stateView.setTextColor(palette.onSurface)
-                detailView.text = getString(R.string.detail_stopped)
-            }
-            else -> {
-                stateView.text = getString(R.string.state_server)
-                stateView.setTextColor(palette.onSurface)
-                detailView.text = getString(R.string.detail_address, number("port"))
-            }
+        stateView.text = when (dashboard.state) {
+            "READY" -> getString(R.string.state_running)
+            "STARTING" -> getString(R.string.state_starting)
+            "MISSING_RUNTIME" -> getString(R.string.state_runtime_missing)
+            "QUARANTINED" -> getString(R.string.state_quarantined)
+            "STOPPED" -> getString(R.string.state_stopped)
+            else -> getString(R.string.state_server)
         }
+        stateView.setTextColor(
+            when (dashboard.stateLamp) {
+                Lamp.ON -> palette.positive
+                Lamp.OFF -> palette.negative
+                Lamp.UNKNOWN -> palette.onSurface
+            }
+        )
+        detailView.text = when {
+            dashboard.detail.isNotEmpty() -> dashboard.detail
+            dashboard.state == "STARTING" -> getString(R.string.detail_starting)
+            dashboard.state == "MISSING_RUNTIME" -> getString(R.string.detail_runtime_missing)
+            dashboard.state == "STOPPED" -> getString(R.string.detail_stopped)
+            dashboard.state == "QUARANTINED" -> getString(R.string.detail_quarantine_default)
+            else -> ""
+        }
+        primaryAction.text = if (dashboard.state == "STOPPED") {
+            getString(R.string.action_start)
+        } else {
+            getString(R.string.action_stop)
+        }
+        renderRuntimeSection()
+    }
 
+    private fun renderServing(dashboard: app.grom.server.ui.Dashboard) {
+        for (row in dashboard.rows) {
+            val views = servingViews[row.id] ?: continue
+            repaintLamp(views.first, row.lamp, palette)
+            views.second.text = row.value ?: getString(R.string.serve_none)
+            views.second.setTextColor(
+                when (row.lamp) {
+                    Lamp.ON -> palette.positive
+                    Lamp.OFF -> palette.negative
+                    Lamp.UNKNOWN -> palette.muted
+                }
+            )
+        }
+    }
+
+    private fun renderRuntimeSection() {
+        if (!::runtimeTitle.isInitialized) return
+        if (!BuildConfig.GROMSERVER) {
+            runtimeTitle.text = getString(R.string.runtime_not_applicable)
+            runtimeDetail.text = getString(R.string.runtime_install_server_role)
+            return
+        }
+        val runtimePresent = status?.get("runtime") == "node"
+        val pid = number("pid")
         if (runtimePresent) {
             runtimeTitle.text = if (pid > 0) {
                 getString(R.string.runtime_ready)
@@ -1171,12 +1866,6 @@ class GromActivity : Activity() {
             } else {
                 getString(R.string.runtime_missing_generic)
             }
-        }
-
-        primaryAction.text = if (state == "STOPPED" || state == null) {
-            getString(R.string.action_start)
-        } else {
-            getString(R.string.action_stop)
         }
     }
 
@@ -1225,6 +1914,7 @@ class GromActivity : Activity() {
     }
 
     private fun renderInvite() {
+        if (!::inviteCodeView.isInitialized) return
         inviteCodeView.text = ReferralStore.code(this)
         val shares = ReferralStore.shares(this)
         inviteSharesView.text = if (shares == 0) {
@@ -1262,8 +1952,6 @@ class GromActivity : Activity() {
             ReferralStore.recordShare(this)
             renderInvite()
         } catch (_: Exception) {
-            // No share sheet on this device: copying the link is the honest
-            // fallback, and it is still an explicit operator action.
             copyInviteLink()
         }
     }
@@ -1316,7 +2004,9 @@ class GromActivity : Activity() {
                         if (release == null) UpdateState.Current else UpdateState.Available(release)
                     },
                     onFailure = { failure ->
-                        UpdateState.Failed(failure.message ?: getString(R.string.update_unknown_failure))
+                        UpdateState.Failed(
+                            failure.message ?: getString(R.string.update_unknown_failure)
+                        )
                     }
                 )
                 renderUpdate()
@@ -1344,9 +2034,13 @@ class GromActivity : Activity() {
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                REQUEST_NOTIFICATIONS
+            )
         }
     }
 

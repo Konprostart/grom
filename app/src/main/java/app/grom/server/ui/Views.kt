@@ -149,6 +149,89 @@ internal fun Context.actionRowState(
     return row to value
 }
 
+/**
+ * A 9dp status lamp (D56). The colour is the only thing in the app that is not
+ * monochrome, because "running" must be readable at a glance; a text label is
+ * always rendered next to it so colour is never the sole carrier of meaning.
+ */
+internal fun Context.lampView(lamp: Lamp, palette: Palette): View = View(this).apply {
+    val colour = when (lamp) {
+        Lamp.ON -> palette.positive
+        Lamp.OFF -> palette.negative
+        Lamp.UNKNOWN -> palette.muted
+    }
+    background = shape(colour, 999)
+    layoutParams = LinearLayout.LayoutParams(dp(9), dp(9)).apply {
+        marginEnd = dp(10)
+    }
+}
+
+/**
+ * A collapsible section header. Returns the row and the chevron so the caller
+ * can flip only the glyph on toggle instead of rebuilding the card.
+ */
+internal fun Context.sectionHeader(
+    title: String,
+    expanded: Boolean,
+    palette: Palette,
+    onToggle: () -> Unit
+): Pair<LinearLayout, TextView> {
+    val chevron = text(
+        if (expanded) "\u25BE" else "\u25B8",
+        16f,
+        palette.muted,
+        gravity = Gravity.END
+    )
+    val row = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(14), 0, dp(14))
+        isClickable = true
+        isFocusable = true
+        background = RippleDrawable(ColorStateList.valueOf(palette.ripple), null, null)
+        setOnClickListener { onToggle() }
+        addView(
+            label(title, palette),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        addView(chevron)
+    }
+    return row to chevron
+}
+
+/** A compact "lamp · title · value" row used by the Now serving card. */
+internal fun Context.servingRow(
+    title: String,
+    value: String?,
+    lamp: Lamp,
+    palette: Palette
+): Triple<LinearLayout, View, TextView> {
+    val dot = lampView(lamp, palette)
+    val valueView = text(value ?: "", 13f, palette.muted, gravity = Gravity.END)
+    val row = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(9), 0, dp(9))
+        addView(dot)
+        addView(
+            text(title, 14f, palette.onSurface),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        addView(valueView)
+    }
+    return Triple(row, dot, valueView)
+}
+
+/** Re-tints an existing lamp without rebuilding the row. */
+internal fun Context.repaintLamp(view: View, lamp: Lamp, palette: Palette) {
+    val colour = when (lamp) {
+        Lamp.ON -> palette.positive
+        Lamp.OFF -> palette.negative
+        Lamp.UNKNOWN -> palette.muted
+    }
+    view.background = shape(colour, 999)
+}
+
 internal fun Context.divider(palette: Palette): View = View(this).apply {
     setBackgroundColor(palette.border)
     layoutParams = LinearLayout.LayoutParams(

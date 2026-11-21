@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Grom</string>
-    <string name="notification_channel">Grom server</string>
-    <string name="notification_title">Grom is running</string>
-    <string name="notification_text">Loopback-only server on 127.0.0.1</string>
 
     <!-- Operator surface (D36). Keeping every visible string here makes a
          localization pass mechanical and keeps lint's SetTextI18n clean. -->
@@ -11,8 +8,6 @@
     <string name="ui_subtitle">LOCAL SERVER \u00b7 ANDROID</string>
     <string name="ui_footer">Grom %1$s \u00b7 Apache-2.0</string>
     <string name="ui_status">Status</string>
-    <string name="ui_node_runtime">Node runtime</string>
-    <string name="ui_control">Control</string>
     <string name="ui_update">Update</string>
     <string name="ui_restart_agent">Restart agent</string>
     <string name="ui_reset_quarantine">Reset quarantine</string>
@@ -40,8 +35,6 @@
     <string name="detail_peripheral">This role never binds a socket. It can still check for app updates.</string>
     <string name="detail_ipc_unbound">IPC not bound.</string>
     <string name="detail_ipc_reason">IPC not bound \u2014 %1$s</string>
-    <string name="detail_address">127.0.0.1:%1$d</string>
-    <string name="detail_address_agent">127.0.0.1:%1$d \u00b7 agent :%2$d</string>
     <string name="detail_starting">The supervisor is bringing the agent up.</string>
     <string name="detail_runtime_missing">The HTTP API is live, but the agent cannot start until a runtime is installed.</string>
     <string name="detail_quarantine_default">Three crashes inside the window.</string>
@@ -49,8 +42,6 @@
 
     <string name="runtime_not_applicable">Not applicable</string>
     <string name="runtime_install_server_role">Install the server role to run the agent.</string>
-    <string name="runtime_unknown">Unknown</string>
-    <string name="runtime_start_to_inspect">Start the server to inspect the runtime.</string>
     <string name="runtime_ready">Node agent ready</string>
     <string name="runtime_installed">Node runtime installed</string>
     <string name="runtime_ready_detail">pid %1$d \u00b7 restarts %2$d \u00b7 crashes %3$d</string>
@@ -84,8 +75,6 @@
     <string name="toast_no_download_link">No download link in this release</string>
 
     <!-- Public access / super server (D39…D47). -->
-    <string name="ui_access">Access</string>
-    <string name="access_title">Public API</string>
     <string name="access_off">Off</string>
     <string name="access_listening">Listening on %1$s</string>
     <string name="access_bind">Bind</string>
@@ -130,7 +119,6 @@
 
     <!-- Invite & Earn (D50, D51). Rewards are not live; the app says so. -->
     <string name="invite_label">Invite &amp; Earn</string>
-    <string name="invite_title">Invite friends</string>
     <string name="invite_detail">Share your code. Rewards are not live yet, and Grom never shows earnings it does not have.</string>
     <string name="invite_your_code">Your code</string>
     <string name="invite_copy_link">Copy link</string>
@@ -205,4 +193,86 @@
     <string name="dialog_bridge_description">Description (optional)</string>
     <string name="toast_bridge_invalid">That hint is too long or looks like a secret</string>
     <string name="toast_config_copied">Config copied \u2014 no secrets included</string>
+
+    <!-- Dashboard and collapsible sections (D56). -->
+    <string name="ui_serving">Now serving</string>
+    <string name="serve_control">Control plane</string>
+    <string name="serve_data">Data plane</string>
+    <string name="serve_bridge">Bridge</string>
+    <string name="serve_project">Project</string>
+    <string name="serve_none">not configured</string>
+    <string name="ui_runtime_section">Runtime &amp; supervision</string>
+    <string name="ui_external">External servers</string>
+    <string name="ui_nostr_lightning">Nostr &amp; Lightning</string>
+    <string name="ui_projects">Local projects</string>
+    <string name="ui_public_access">Public access</string>
+
+    <!-- External SSH servers (D58). -->
+    <string name="ssh_add">Add server</string>
+    <string name="ssh_none">No external servers saved</string>
+    <string name="ssh_hint">A reverse SSH tunnel you start yourself. Grom only forwards the public API port; it never runs a shell on the server.</string>
+    <string name="ssh_state_connected">connected</string>
+    <string name="ssh_state_connecting">connecting</string>
+    <string name="ssh_state_disconnected">not connected</string>
+    <string name="ssh_state_failed">failed</string>
+    <string name="ssh_row_detail">%1$s@%2$s:%3$d</string>
+    <string name="ssh_action_connect">Connect</string>
+    <string name="ssh_action_disconnect">Disconnect</string>
+    <string name="ssh_action_edit">Edit</string>
+    <string name="ssh_action_delete">Delete</string>
+    <string name="ssh_action_copy_key">Copy public key</string>
+    <string name="ssh_action_clear_pin">Forget host key</string>
+    <string name="ssh_action_close">Close</string>
+    <string name="ssh_connecting">Connecting\u2026</string>
+    <string name="ssh_connected">Tunnel connected</string>
+    <string name="ssh_disconnected">Tunnel closed</string>
+    <string name="ssh_confirm_title">Host key</string>
+    <string name="ssh_confirm_body">%1$s\n\nTrust this key? It is pinned until you forget it.</string>
+    <string name="ssh_confirm_action">Trust and connect</string>
+    <string name="ssh_mismatch_title">Host key changed</string>
+    <string name="ssh_mismatch_body">The server presented a different key.\n\nPinned: %1$s\nNow: %2$s</string>
+    <string name="ssh_mismatch_action">Forget pin and retry</string>
+    <string name="ssh_unavailable">SSH is unavailable in this build</string>
+    <string name="ssh_error">SSH: %1$s</string>
+    <string name="ssh_public_key_copied">Public key copied</string>
+    <string name="ssh_delete_title">Remove server?</string>
+    <string name="ssh_delete_body">The saved credential is deleted from this device.</string>
+    <string name="ssh_delete_action">Remove</string>
+    <string name="dialog_ssh_add">Add SSH server</string>
+    <string name="dialog_ssh_edit">Edit SSH server</string>
+    <string name="ssh_field_label">Label</string>
+    <string name="ssh_field_host">Host or IP</string>
+    <string name="ssh_field_port">Port</string>
+    <string name="ssh_field_user">Username</string>
+    <string name="ssh_field_password">Password</string>
+    <string name="ssh_field_forward">Remote forward port</string>
+    <string name="ssh_auth_key">SSH key</string>
+    <string name="ssh_auth_password">Password</string>
+    <string name="ssh_generate">Generate Ed25519 key</string>
+    <string name="ssh_private_key_hint">OpenSSH private key</string>
+    <string name="ssh_public_line">Public key (add to the VPS authorized_keys)</string>
+    <string name="ssh_key_generated">Key generated \u2014 save it with the server</string>
+    <string name="ssh_key_generate_failed">Key generation failed</string>
+    <string name="ssh_key_private_note">The private key is encrypted by the Android Keystore before it is written.</string>
+    <string name="ssh_forward_note">The VPS forwards this port to the phone data plane.</string>
+    <string name="ssh_saved">Server saved</string>
+    <string name="ssh_key_required">Generate or paste a private key</string>
+    <string name="ssh_password_required">Enter a password</string>
+
+    <!-- Local projects (D55). -->
+    <string name="projects_empty">No projects registered</string>
+    <string name="projects_hint">Apps that embed the Grom engine register here and heartbeat every 30 seconds.</string>
+    <string name="project_alive">alive</string>
+    <string name="project_stale">stale</string>
+    <string name="project_embedded_note">Managed by the host app; Grom does not start or stop it.</string>
+
+    <!-- Measured Lightning health (D52). -->
+    <string name="lightning_health">Lightning health</string>
+    <string name="lightning_not_probed">not probed</string>
+    <string name="lightning_reachable">reachable</string>
+    <string name="lightning_unreachable">unreachable</string>
+    <string name="lightning_probe_now">Probe now</string>
+    <string name="lightning_probing">Probing\u2026</string>
+    <string name="lightning_probe_ok">Lightning backend reachable</string>
+    <string name="lightning_probe_failed">Probe failed: %1$s</string>
 </resources>
