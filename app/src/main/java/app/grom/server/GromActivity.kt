@@ -27,6 +27,7 @@ import android.widget.Toast
 import app.grom.server.core.BindMode
 import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
+import app.grom.server.notify.NotifySettingsRules
 import app.grom.server.referral.ReferralStore
 import app.grom.server.service.GromPrefs
 import app.grom.server.ssh.SshTarget
@@ -49,6 +50,7 @@ import app.grom.server.ui.DashboardModel
 import app.grom.server.ui.GromTheme
 import app.grom.server.ui.HelpModel
 import app.grom.server.ui.Lamp
+import app.grom.server.ui.NotifyModel
 import app.grom.server.ui.Palette
 import app.grom.server.ui.actionRow
 import app.grom.server.ui.actionRowState
@@ -133,6 +135,19 @@ class GromActivity : Activity() {
 
     private lateinit var projectsList: LinearLayout
     private var lastProjectsSignature: String? = null
+
+    /** Telegram alerts (D65). The token is never displayed, only "set". */
+    private lateinit var alertsEnableRow: Pair<LinearLayout, TextView>
+    private lateinit var alertsChatRow: Pair<LinearLayout, TextView>
+    private lateinit var alertsTokenRow: Pair<LinearLayout, TextView>
+    private lateinit var alertsTestRow: Pair<LinearLayout, TextView>
+    private lateinit var alertsStateRow: Pair<LinearLayout, TextView>
+    private var alertsLamp: View? = null
+    private lateinit var alertsDetail: TextView
+    private var alertsChatId: String = ""
+    private var alertsTokenSet: Boolean = false
+    private var alertsEnabled: Boolean = false
+    private var lastAlertsSignature: String? = null
 
     private lateinit var updateTitle: TextView
     private lateinit var updateDetail: TextView
@@ -237,6 +252,12 @@ class GromActivity : Activity() {
             column.addView(
                 sectionCard("projects", R.string.ui_projects, defaultOpen = false) {
                     buildProjectsSection(it)
+                }
+            )
+            column.addView(gap(14))
+            column.addView(
+                sectionCard("alerts", R.string.ui_alerts, defaultOpen = false) {
+                    buildAlertsSection(it)
                 }
             )
             column.addView(gap(14))
@@ -442,7 +463,7 @@ class GromActivity : Activity() {
      * the order is fixed by [HelpModel], and nothing here reports state.
      */
     private fun buildHelpSection(body: LinearLayout) {
-        for ((index, block) in HelpModel.blocks().withIndex()) {
+        for ((index, block) in HelpModel.blocks(BuildConfig.GROMSERVER).withIndex()) {
             if (index > 0) body.addView(gap(14))
             body.addView(
                 text(getString(block.headingRes), 14f, palette.onSurface, Typeface.BOLD)
@@ -566,6 +587,175 @@ class GromActivity : Activity() {
         body.addView(gap(8))
         projectsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(projectsList)
+    }
+
+    /**
+     * Telegram alerts (D65-D67).
+     *
+     * The token is write-only from the screen's point of view: the row says
+     * "set" or "not set" and the dialog starts empty, because the sealed value
+     * is never handed back to the UI.
+     */
+    private fun buildAlertsSection(body: LinearLayout) {
+        body.addView(text(getString(R.string.alerts_hint), 12f, palette.muted))
+        body.addView(gap(8))
+        alertsEnableRow = actionRowState(getString(R.string.alerts_enable), palette) {
+            toggleAlerts()
+        }
+        body.addView(alertsEnableRow.first)
+        body.addView(divider(palette))
+        alertsChatRow = actionRowState(getString(R.string.alerts_chat_id), palette) {
+            showChatIdDialog()
+        }
+        body.addView(alertsChatRow.first)
+        body.addView(divider(palette))
+        alertsTokenRow = actionRowState(getString(R.string.alerts_token), palette) {
+            showTokenDialog()
+        }
+        body.addView(alertsTokenRow.first)
+        body.addView(divider(palette))
+        alertsTestRow = actionRowState(getString(R.string.alerts_test), palette) {
+            sendTestAlert()
+        }
+        body.addView(alertsTestRow.first)
+        body.addView(divider(palette))
+        // The last delivery is the only line with a lamp: it is the only one
+        // that can be measured (D67). Configuration alone stays grey.
+        val state = servingRow(
+            getString(R.string.alerts_last_delivery),
+            getString(R.string.alerts_state_ready),
+            Lamp.UNKNOWN,
+            palette
+        )
+        alertsStateRow = state.first to state.third
+        alertsLamp = state.second
+        body.addView(state.first)
+        body.addView(gap(6))
+        alertsDetail = text("", 11f, palette.muted)
+        body.addView(alertsDetail)
+    }
+
+    // ------------------------------------------------------- Telegram alerts
+
+    private fun toggleAlerts() {
+        val enabled = !alertsEnabled
+        if (enabled && (!alertsTokenSet || alertsChatId.isBlank())) {
+            toast(getString(R.string.toast_alerts_not_configured))
+            return
+        }
+        saveAlerts(mapOf("enabled" to enabled, "chatId" to alertsChatId))
+    }
+
+    private fun showChatIdDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
+            hint = getString(R.string.dialog_chat_hint)
+            setSingleLine()
+            setText(alertsChatId)
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_chat_title)
+            .setMessage(R.string.dialog_chat_body)
+            .setView(input)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val raw = input.text.toString().trim()
+                // The engine's own pattern: validation cannot drift between
+                // the screen and the store.
+                if (raw.isNotEmpty() && !NotifySettingsRules.CHAT_ID_PATTERN.matches(raw)) {
+                    toast(getString(R.string.toast_chat_invalid))
+                    return@setPositiveButton
+                }
+                saveAlerts(mapOf("enabled" to alertsEnabled, "chatId" to raw))
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                saveAlerts(mapOf("enabled" to false, "chatId" to ""))
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    /**
+     * The token is never shown: the field starts empty and an empty Save keeps
+     * the stored one, so the operator can edit the chat id without retyping a
+     * secret the engine will not hand back.
+     */
+    private fun showTokenDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = getString(R.string.dialog_token_hint)
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_token_title)
+            .setMessage(R.string.dialog_token_body)
+            .setView(input)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val raw = input.text.toString().trim()
+                if (raw.isEmpty()) {
+                    saveAlerts(mapOf("enabled" to alertsEnabled, "chatId" to alertsChatId))
+                    return@setPositiveButton
+                }
+                if (!NotifySettingsRules.TOKEN_PATTERN.matches(raw)) {
+                    toast(getString(R.string.toast_token_invalid))
+                    return@setPositiveButton
+                }
+                saveAlerts(
+                    mapOf("enabled" to alertsEnabled, "chatId" to alertsChatId, "token" to raw)
+                )
+            }
+            .setNeutralButton(R.string.dialog_clear) { _, _ ->
+                saveAlerts(
+                    mapOf(
+                        "enabled" to false,
+                        "chatId" to alertsChatId,
+                        "clearToken" to true
+                    )
+                )
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun saveAlerts(body: Map<String, Any?>) {
+        val server = client.server
+        if (server == null) {
+            toast(getString(R.string.toast_not_bound, getString(R.string.ui_alerts)))
+            return
+        }
+        val result = runCatching { server.notifySaveSettings(Json.encode(body)) }
+        val failure = result.exceptionOrNull()
+        if (failure != null) {
+            val message = (failure as? IllegalStateException)?.message ?: failure.javaClass.simpleName
+            toast(getString(R.string.toast_alerts_save_failed, message))
+            return
+        }
+        toast(getString(R.string.toast_alerts_saved))
+        refreshNow()
+    }
+
+    /** Blocking send: never on the main thread, and the answer is reported. */
+    private fun sendTestAlert() {
+        val server = client.server
+        if (server == null) {
+            toast(getString(R.string.toast_not_bound, getString(R.string.alerts_test)))
+            return
+        }
+        Thread({
+            val raw = runCatching { server.notifyTestJson() }.getOrNull()
+            val parsed = raw?.let { JsonParser.parseObjectOrNull(it) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (parsed?.get("ok") == true) {
+                    toast(getString(R.string.toast_alerts_delivered))
+                } else {
+                    val code = parsed?.get("code") as? String
+                        ?: getString(R.string.alerts_state_failed)
+                    toast(getString(R.string.toast_alerts_failed, code))
+                }
+                refreshNow()
+            }
+        }, "grom-alert-test").start()
     }
 
     private fun buildAccessSection(body: LinearLayout) {
@@ -1281,8 +1471,13 @@ class GromActivity : Activity() {
             ?.filter { it.key is String }
             ?.associate { it.key as String to it.value }
             ?: emptyMap()
+        val notifications = (status?.get("notifications") as? Map<*, *>)
+            ?.entries
+            ?.filter { it.key is String }
+            ?.associate { it.key as String to it.value }
+            ?: emptyMap()
         copyText(
-            ConfigExport.render(superConfig, lightning, projects, bridge),
+            ConfigExport.render(superConfig, lightning, projects, bridge, notifications),
             R.string.toast_config_copied
         )
     }
@@ -1993,11 +2188,46 @@ class GromActivity : Activity() {
 
     // -------------------------------------------------------------------- render
 
+    /**
+     * The alerts rows. `chatId`/`tokenSet` come from the Binder (status keeps
+     * them off the data plane), while the lamp comes from the status block, so
+     * only a measured delivery can turn it green.
+     */
+    private fun renderAlerts() {
+        val block = status?.get("notifications") as? Map<*, *>
+        val settings = client.call(null) {
+            JsonParser.parseObjectOrNull(it.notifySettingsJson())
+        }
+        alertsChatId = (settings?.get("chatId") as? String).orEmpty()
+        alertsTokenSet = settings?.get("tokenSet") == true
+        alertsEnabled = block?.get("enabled") == true
+
+        val signature = "${block?.get("enabled")}|${block?.get("configured")}|" +
+            "${(block?.get("lastDelivery") as? Map<*, *>)?.get("ok")}|" +
+            "$alertsChatId|$alertsTokenSet"
+        if (signature == lastAlertsSignature) return
+        lastAlertsSignature = signature
+
+        val row = NotifyModel.row(block)
+        alertsEnableRow.second.text =
+            if (alertsEnabled) getString(R.string.ui_on) else getString(R.string.ui_off)
+        alertsChatRow.second.text =
+            alertsChatId.ifEmpty { getString(R.string.alerts_chat_not_set) }
+        alertsTokenRow.second.text =
+            if (alertsTokenSet) getString(R.string.alerts_token_set)
+            else getString(R.string.alerts_token_not_set)
+        alertsTestRow.second.text = getString(R.string.alerts_test)
+        alertsStateRow.second.text = getString(row.valueRes)
+        alertsDetail.text = if (row.detailRes != 0) getString(row.detailRes) else ""
+        alertsLamp?.let { repaintLamp(it, row.lamp, palette) }
+    }
+
     private fun render() {
         if (BuildConfig.GROMSERVER) {
             renderSuper()
             renderSsh()
             renderProjects()
+            renderAlerts()
         }
         val dashboard = DashboardModel.build(status)
         renderServing(dashboard)

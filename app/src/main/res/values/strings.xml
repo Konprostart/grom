@@ -306,6 +306,43 @@
     <string name="project_details_copied">Project details copied</string>
     <string name="project_actions_hint">Remove now clears the entry; a running app re-registers within 30 seconds.</string>
 
+
+    <!-- Telegram alerts (D65-D67). The token is sealed by the Keystore and the
+         chat id never appears in status or in the sanitised export. -->
+    <string name="ui_alerts">Telegram alerts</string>
+    <string name="alerts_enable">Alerts</string>
+    <string name="alerts_chat_id">Chat ID</string>
+    <string name="alerts_token">Bot token</string>
+    <string name="alerts_test">Send test message</string>
+    <string name="alerts_last_delivery">Last delivery</string>
+    <string name="alerts_hint">Sent only to your own chat. Nothing else: no keys, no addresses, no balances.</string>
+    <string name="alerts_state_off">off</string>
+    <string name="alerts_state_not_configured">not configured</string>
+    <string name="alerts_not_configured_hint">Enter a bot token and a chat id before switching alerts on.</string>
+    <string name="alerts_state_ready">ready; nothing sent yet</string>
+    <string name="alerts_ready_hint">No message has been sent yet, so nothing is proven.</string>
+    <string name="alerts_state_delivered">last message delivered</string>
+    <string name="alerts_state_failed">last delivery failed</string>
+    <string name="alerts_token_set">set</string>
+    <string name="alerts_token_not_set">not set</string>
+    <string name="alerts_chat_not_set">not set</string>
+    <string name="dialog_token_title">Bot token</string>
+    <string name="dialog_token_body">From @BotFather: /newbot, then paste the token here. It is sealed with the Android Keystore and never shown again or returned by any API.</string>
+    <string name="dialog_token_hint">123456789:AAH\u2026</string>
+    <string name="dialog_chat_title">Chat ID</string>
+    <string name="dialog_chat_body">Numeric only: your own user id for a private chat, or a negative id for a group. Send your bot a message first, then use the id from that chat.</string>
+    <string name="dialog_chat_hint">123456789</string>
+    <string name="toast_alerts_not_configured">Add a bot token and a chat id first</string>
+    <string name="toast_alerts_delivered">Test message delivered</string>
+    <string name="toast_alerts_failed">Not delivered: %1$s</string>
+    <string name="toast_alerts_saved">Alert settings saved</string>
+    <string name="toast_alerts_save_failed">Could not save: %1$s</string>
+    <string name="toast_chat_invalid">The chat id must be numeric</string>
+    <string name="toast_token_invalid">That does not look like a bot token</string>
+
+    <string name="help_alerts_heading">Alerts when something breaks</string>
+    <string name="help_alerts_body">If you want to hear about a crash, a stopped server or a broken link without staring at the screen, switch on Telegram alerts: create a bot, paste its token and your chat id, and the phone sends you a short message when something changes. The message is one fixed sentence \u2014 never a password, an address or an amount. If the phone is off or the app was closed, nothing is sent, because the phone is the one sending.</string>
+
     <!-- Saved servers are unlimited; live tunnels are not (D64). -->
     <plurals name="ssh_advisory">
         <item quantity="one">%1$d server saved. At most %2$d can be connected at once; the rest stay idle until you connect them.</item>

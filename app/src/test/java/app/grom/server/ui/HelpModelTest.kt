@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package app.grom.server.ui
 
+import app.grom.server.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -19,13 +20,31 @@ import java.io.File
 class HelpModelTest {
 
     @Test
-    fun `there are exactly three blocks, in a fixed order`() {
-        // Adding a fourth block is a product decision, not a refactor: this
-        // fails so the reviewer sees it.
-        val blocks = HelpModel.blocks()
+    fun `the server role has four blocks, in a fixed order`() {
+        // Adding a block is a product decision, not a refactor: this fails so
+        // the reviewer sees it. The fourth one is the alert explanation (D65).
+        val blocks = HelpModel.blocks(serverRole = true)
+        assertEquals(4, blocks.size)
+        assertEquals(4, blocks.map { it.headingRes }.toSet().size)
+        assertEquals(4, blocks.map { it.bodyRes }.toSet().size)
+        assertEquals(R.string.help_alerts_heading, blocks.last().headingRes)
+    }
+
+    @Test
+    fun `a role without alerts explains only what it has`() {
+        // peripheral26 neither serves nor notifies: promising the section there
+        // would be the exact kind of untruth this text exists to avoid.
+        val blocks = HelpModel.blocks(serverRole = false)
         assertEquals(3, blocks.size)
-        assertEquals(3, blocks.map { it.headingRes }.toSet().size)
-        assertEquals(3, blocks.map { it.bodyRes }.toSet().size)
+        assertEquals(R.string.help_remote_heading, blocks.last().headingRes)
+    }
+
+    @Test
+    fun `the roles share the first three blocks in the same order`() {
+        assertEquals(
+            HelpModel.blocks(serverRole = false),
+            HelpModel.blocks(serverRole = true).take(3)
+        )
     }
 
     @Test
@@ -53,6 +72,7 @@ class HelpModelTest {
             "help_what_heading", "help_what_body",
             "help_local_heading", "help_local_body",
             "help_remote_heading", "help_remote_body",
+            "help_alerts_heading", "help_alerts_body",
             "help_footnote"
         ).forEach { name ->
             assertTrue("missing string: $name", names.contains(name))
