@@ -24,7 +24,9 @@ object ConfigExport {
 
     fun render(
         config: SuperServerConfig,
-        lightning: Map<String, Any?>
+        lightning: Map<String, Any?>,
+        projects: List<Map<String, Any?>> = emptyList(),
+        bridge: Map<String, Any?> = emptyMap()
     ): String = Json.encode(
         linkedMapOf(
             "source" to SOURCE,
@@ -39,7 +41,24 @@ object ConfigExport {
                         "description" to it.description.trim()
                     )
                 },
+            // Measured, not configured: `connected` is true only while a tunnel
+            // is actually up. The host, the user and the pin stay on the phone.
+            "bridge" to linkedMapOf(
+                "configured" to (bridge["configured"] == true),
+                "connected" to (bridge["connected"] == true),
+                "active" to ((bridge["active"] as? Number)?.toInt() ?: 0)
+            ),
+            "projects" to projects.map { project ->
+                linkedMapOf(
+                    "id" to (project["id"] as? String),
+                    "title" to (project["title"] as? String),
+                    "version" to (project["version"] as? String),
+                    "capabilities" to (project["capabilities"] as? List<*>),
+                    "state" to (project["state"] as? String)
+                )
+            },
             "dataPlane" to linkedMapOf(
+                "enabled" to config.enabled,
                 "bind" to config.bind.name,
                 "port" to config.port,
                 "auth" to config.auth.name,

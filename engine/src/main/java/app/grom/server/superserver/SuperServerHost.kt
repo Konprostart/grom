@@ -35,7 +35,13 @@ class SuperServerHost(
     private val agentHealth: () -> Map<String, Any?>,
     private val agentExec: (String, String?) -> HttpResponse,
     private val audit: (String, String) -> Unit,
-    private val logger: (String) -> Unit
+    private val logger: (String) -> Unit,
+    /**
+     * Read-only project registrations (D55) and the measured SSH bridge state
+     * (D58). Both are lazily read so a heartbeat refresh needs no rebuild.
+     */
+    private val projects: () -> List<Map<String, Any?>> = { emptyList() },
+    private val bridge: () -> Map<String, Any?> = { emptyMap() }
 ) {
 
     private val lock = Any()
@@ -109,7 +115,36 @@ class SuperServerHost(
 
     fun isRunning(): Boolean = server?.isRunning() == true
 
+    /**
+     * Runs the Lightning adapter's `health` op now (D52). This is the only path
+     * that can turn the Lightning lamp green: status never probes on its own.
+     * When the data plane is disabled the registry is empty, so the answer is a
+     * truthful "not configured" rather than a fabricated result.
+     */
+    fun probeLightning(): Map<String, Any?> {
+        val plugin = registry.find("lightning")
+            ?: return mapOf(
+                "ok" to false,
+                "code" to "LIGHTNING_UNCONFIGURED",
+                "message" to "no Lightning backend is configured"
+            )
+        return when (val result = plugin.rpc("health", emptyMap())) {
+            is PluginResult.Ok -> mapOf("ok" to true) + result.payload
+            is PluginResult.Failure -> mapOf(
+                "ok" to false,
+                "code" to result.code,
+                "message" to result.message
+            )
+        }
+    }
+
     fun logLastError(): String? = lastError
+
+    /**
+     * The configuration currently applied. Read by the sanitised export (D53)
+     * and by the SSH bridge so it forwards to the address that really exists.
+     */
+    fun currentConfig(): SuperServerConfig = config
 
     /** Snapshot for `GET /v1/status`, `/grom/v1/status` and the UI. */
     fun status(): Map<String, Any?> {
@@ -133,7 +168,9 @@ class SuperServerHost(
             "plugins" to registry.all().map {
                 mapOf("id" to it.id, "capabilities" to it.capabilities().sorted())
             },
-            "referral" to ReferralStore.summary(appContext)
+            "referral" to ReferralStore.summary(appContext),
+            "projects" to projects(),
+            "bridge" to bridge()
         ) + SuperStatusDocument.build(config, lightningStatus)
     }
 
@@ -186,10 +223,15 @@ class SuperServerHost(
             listOf(
                 AgentPlugin(agentHealth, agentExec) {
                     // Read at call time so a reference-only reload needs no
-                    // registry rebuild (D54).
+                    // registry rebuild (D54). Projects and the SSH bridge are
+                    // part of the authenticated status (D59); the health op
+                    // stays free of them.
                     SuperStatusDocument.build(
                         config,
                         registry.find("lightning")?.status() ?: emptyMap()
+                    ) + mapOf(
+                        "projects" to projects(),
+                        "bridge" to bridge()
                     )
                 },
                 LightningPlugin(backend, loaded.lightning.kind.wireName, backendError)

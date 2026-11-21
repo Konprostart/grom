@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      Apache MINA SSHD's ExceptionUtils.peelException() performs
+      `instanceof javax.management.ReflectionException`. Android has no
+      javax.management package, so the engine supplies a minimal stand-in at
+      engine/src/main/java/javax/management/ReflectionException.java and this
+      suppression is narrowed to that one reference. Every other unavailable
+      package remains an error.
+    -->
+    <issue id="InvalidPackage">
+        <ignore regexp="javax\.management\.ReflectionException"/>
+    </issue>
+</lint>

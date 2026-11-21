@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Notification copy owned by the engine, so an embedding host gets a
+         legible foreground-service notification without supplying its own. -->
+    <string name="grom_engine_notification_channel">Grom server</string>
+    <string name="grom_engine_notification_title">Grom is running</string>
+    <string name="grom_engine_notification_text">Local server \u00b7 control plane on loopback</string>
+</resources>

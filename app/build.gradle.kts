@@ -3,6 +3,15 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+/**
+ * The Grom operator app (D55).
+ *
+ * This module is only the surface plus the two role flavours. All server code
+ * lives in `:engine`, which is an ordinary Android library so a host
+ * application can embed the same server. The Node runtime binaries stay here
+ * because the executable must be extracted into *this* app's nativeLibraryDir
+ * (D34, `jniLibs` packaging below).
+ */
 android {
     namespace = "app.grom.server"
     compileSdk = 36
@@ -11,8 +20,8 @@ android {
         applicationId = "app.grom.server"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
     // Two role flavours (F1 step 1):
@@ -56,7 +65,6 @@ android {
 
     buildFeatures {
         buildConfig = true
-        aidl = true
     }
 
     // D34: the Node runtime is executed from the APK's native library dir, so
@@ -66,6 +74,18 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+        }
+        resources {
+            // sshd-core and sshd-common both ship Maven metadata and the
+            // Apache licence files. One copy of each is enough; the licence and
+            // the notice are still packaged and are also listed in
+            // third_party/THIRD_PARTY.md.
+            pickFirsts += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/INDEX.LIST"
+            )
         }
     }
 
@@ -88,42 +108,8 @@ android {
     }
 }
 
-/**
- * Copies the canonical agent script into a generated assets directory.
- *
- * It is registered through `variant.sources.assets.addGeneratedSourceDirectory`
- * rather than wired by task name, so every consumer (merge assets, packaging
- * and lint's model writer) gets a declared dependency automatically. Pattern
- * matching on task names is what produced an implicit-dependency failure.
- */
-abstract class SyncAgentRuntime : DefaultTask() {
-    @get:InputFile
-    abstract val sourceFile: RegularFileProperty
-
-    @get:OutputDirectory
-    abstract val outputDirectory: DirectoryProperty
-
-    @TaskAction
-    fun sync() {
-        // The directory is an assets root, so the agent lands at node/<name>.
-        val target = outputDirectory.get().asFile.resolve("node/grom-agent.js")
-        target.parentFile.mkdirs()
-        sourceFile.get().asFile.copyTo(target, overwrite = true)
-    }
-}
-
-val syncAgentRuntime = tasks.register<SyncAgentRuntime>("syncAgentRuntime") {
-    sourceFile.set(rootProject.layout.projectDirectory.file("agent/grom-agent.js"))
-    outputDirectory.set(layout.buildDirectory.dir("generated/agent-assets"))
-}
-
-androidComponents {
-    onVariants { variant ->
-        variant.sources.assets?.addGeneratedSourceDirectory(syncAgentRuntime) { it.outputDirectory }
-    }
-}
-
 dependencies {
+    implementation(project(":engine"))
     implementation(project(":sdk"))
     testImplementation("junit:junit:4.13.2")
 }

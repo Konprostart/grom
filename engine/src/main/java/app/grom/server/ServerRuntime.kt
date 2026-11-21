@@ -9,8 +9,10 @@ import app.grom.server.agent.AssetRuntime
 import app.grom.server.agent.NodeAgentProcess
 import app.grom.server.audit.AuditStore
 import app.grom.server.core.AgentState
+import app.grom.server.core.BindResolution
 import app.grom.server.core.HealthGate
 import app.grom.server.core.Redactor
+import app.grom.server.core.SuperBindPolicy
 import app.grom.server.core.SupervisorPolicy
 import app.grom.server.core.Token
 import app.grom.server.http.ApiException
@@ -18,8 +20,18 @@ import app.grom.server.http.GromApi
 import app.grom.server.http.HttpResponse
 import app.grom.server.http.LoopbackHttpServer
 import app.grom.server.http.Router
+import app.grom.server.projects.ProjectRegistry
 import app.grom.server.service.GromPrefs
+import app.grom.server.ssh.SshAuth
+import app.grom.server.ssh.SshKeys
+import app.grom.server.ssh.SshTargetDraft
+import app.grom.server.ssh.SshTargetStore
+import app.grom.server.ssh.SshTunnelManager
+import app.grom.server.store.AndroidKeystoreSecretBox
 import app.grom.server.store.SecureStore
+import app.grom.server.http.Json
+import app.grom.server.http.JsonParser
+import app.grom.server.superserver.ConfigExport
 import app.grom.server.superserver.SuperServerHost
 import java.io.File
 import java.util.concurrent.Executors
@@ -36,13 +48,33 @@ import java.util.concurrent.TimeUnit
  */
 class ServerRuntime(
     private val context: Context,
-    private val logSink: (String) -> Unit = {}
+    private val logSink: (String) -> Unit = {},
+    /**
+     * The host application's version. The engine is a library, so it has no
+     * BuildConfig of its own; callers (GromService, GromEmbed) pass the value
+     * that `PackageManager` reports for the APK this code is running in.
+     */
+    private val appVersion: String = hostVersion(context)
 ) : GromApi {
 
     private val rootDir = File(context.filesDir, "grom")
     private val runtimeDir = File(rootDir, "node")
 
     private val store = SecureStore(rootDir)
+    private val projectRegistry = ProjectRegistry(File(rootDir, ProjectRegistry.FILE_NAME))
+    private val secretBox = AndroidKeystoreSecretBox()
+    private val sshStore = SshTargetStore(File(rootDir, SshTargetStore.FILE_NAME), secretBox)
+
+    /**
+     * The reverse SSH bridge (D58). The manager is owned by the runtime, so the
+     * UI and the IPC surface observe the same sessions and the same pins.
+     */
+    private val sshTunnels = SshTunnelManager(
+        store = sshStore,
+        audit = { action, detail -> safeAudit(action, detail) },
+        logger = { line -> log(line) },
+        localTarget = { localDataPlane() }
+    )
     private val auditStore = AuditStore(File(rootDir, "audit"))
     private val policy = SupervisorPolicy()
     private val agentClient = AgentClient()
@@ -91,7 +123,9 @@ class ServerRuntime(
             agentHealth = { health() },
             agentExec = { op, body -> exec(op, body) },
             audit = { action, detail -> safeAudit(action, detail) },
-            logger = { line -> log(line) }
+            logger = { line -> log(line) },
+            projects = { projectRegistry.summary() },
+            bridge = { sshTunnels.statusForServer() }
         )
     }
 
@@ -131,9 +165,10 @@ class ServerRuntime(
             // The public data plane is independent of the Node agent: it must
             // stay usable when the runtime is missing, and its own start failure
             // is reported rather than taking the control plane down.
-            if (BuildConfig.GROMSERVER) {
-                superServer.start()
-            }
+            // The engine is always the server role. A host that embeds it is
+            // expected to start the service deliberately (D55); nothing binds
+            // unless that happens.
+            superServer.start()
 
             scheduler.scheduleWithFixedDelay({ tick() }, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS)
 
@@ -149,9 +184,8 @@ class ServerRuntime(
             if (!running) return
             safeAudit("server.stop", "")
             running = false
-            if (BuildConfig.GROMSERVER) {
-                superServer.stop()
-            }
+            superServer.stop()
+            sshTunnels.stopAll()
             httpServer?.stop()
             httpServer = null
             agent?.stop()
@@ -178,7 +212,7 @@ class ServerRuntime(
 
     // ------------------------------------------------------------------ GromApi
 
-    override fun apiVersion(): Int = 2
+    override fun apiVersion(): Int = 3
 
     override fun authorize(candidate: String?): Boolean =
         candidate != null && Token.matches(token, candidate)
@@ -189,7 +223,7 @@ class ServerRuntime(
         put("runtime", if (runtime().present) "node" else "missing")
         put("pid", agent?.pid ?: -1L)
         put("uptimeMs", if (startedAt == 0L) 0L else System.currentTimeMillis() - startedAt)
-        put("version", BuildConfig.VERSION_NAME)
+        put("version", appVersion)
     }
 
     override fun status(): Map<String, Any?> {
@@ -206,11 +240,8 @@ class ServerRuntime(
                 "missing" to missing,
                 "agentPort" to agentPort,
                 "lastError" to lastError,
-                "super" to if (BuildConfig.GROMSERVER) {
-                    superServer.status()
-                } else {
-                    mapOf("enabled" to false, "running" to false, "role" to "peripheral")
-                }
+                "projects" to projectRegistry.summary(),
+                "super" to superServer.status()
             )
         }
     }
@@ -318,9 +349,6 @@ class ServerRuntime(
      */
     fun reloadSuperServer(): Map<String, Any?> {
         synchronized(lock) {
-            if (!BuildConfig.GROMSERVER) {
-                throw ApiException(400, "PERIPHERAL_ROLE", "this build does not run the server role")
-            }
             if (!running) {
                 throw ApiException(
                     503,
@@ -370,6 +398,191 @@ class ServerRuntime(
                 }
                 throw ApiException(502, "AGENT_UNAVAILABLE", "agent did not answer: ${result.reason}")
             }
+        }
+    }
+
+    // ------------------------------------------------------- projects (API 3)
+
+    fun projects(): List<Map<String, Any?>> = projectRegistry.summary()
+
+    /**
+     * Registers or refreshes a host project. The claim is stored, not believed:
+     * liveness is derived from the heartbeat in [ProjectRecord.state].
+     */
+    fun announceProject(raw: Map<String, Any?>): String {
+        val record = projectRegistry.announce(raw)
+        audited("project.announce", "id=${record.id} version=${record.version}")
+        return Json.encode(mapOf("ok" to true, "project" to record.toJson(System.currentTimeMillis())))
+    }
+
+    fun removeProject(id: String) {
+        projectRegistry.remove(id)
+        audited("project.remove", "id=$id")
+    }
+
+    /** The sanitised hand-off document (D53); never a serialisation of the config. */
+    fun configExportJson(): String {
+        val superStatus = superServer.status()
+        val lightning = (superStatus["lightningHealth"] as? Map<*, *>)
+            ?.entries
+            ?.filter { it.key is String }
+            ?.associate { it.key as String to it.value }
+            ?: emptyMap()
+        return ConfigExport.render(
+            config = superServer.currentConfig(),
+            lightning = lightning,
+            projects = projectRegistry.summary(),
+            bridge = sshTunnels.statusForServer()
+        )
+    }
+
+    // ------------------------------------------------------- SSH bridge (D58)
+
+    fun sshStatusJson(): String = Json.encode(
+        mapOf(
+            "available" to SshKeys.isSupported(),
+            "maxTargets" to 8,
+            "maxActive" to 2,
+            "targets" to sshTunnels.statusForUi()
+        )
+    )
+
+    /**
+     * Generates an Ed25519 pair. The private key text is returned exactly once
+     * so the caller can hand it back to [sshSaveTargetJson], where the store
+     * seals it. It is never persisted in clear text and never appears in status.
+     */
+    fun sshGenerateKeyJson(): String {
+        val generated = SshKeys.generate()
+            ?: return Json.encode(
+                mapOf(
+                    "ok" to false,
+                    "error" to mapOf(
+                        "code" to "SSH_UNAVAILABLE",
+                        "message" to "this build has no Ed25519 provider"
+                    )
+                )
+            )
+        return Json.encode(
+            mapOf(
+                "ok" to true,
+                "publicKeyLine" to generated.publicKeyLine,
+                "privateKeyText" to generated.privateKeyText
+            )
+        )
+    }
+
+    fun sshSaveTargetJson(draftJson: String): String {
+        val raw = JsonParser.parseObjectOrNull(draftJson)
+            ?: throw ApiException(400, "BAD_TARGET", "body must be a JSON object")
+        val auth = SshAuth.fromWire(raw["auth"] as? String)
+            ?: throw ApiException(400, "BAD_AUTH", "auth must be 'key' or 'password'")
+        val draft = SshTargetDraft(
+            id = (raw["id"] as? String)?.trim()?.takeIf { it.isNotEmpty() },
+            label = (raw["label"] as? String).orEmpty(),
+            host = (raw["host"] as? String).orEmpty(),
+            port = (raw["port"] as? Number)?.toInt() ?: 22,
+            username = (raw["username"] as? String).orEmpty(),
+            auth = auth,
+            password = raw["password"] as? String,
+            privateKey = raw["privateKey"] as? String,
+            publicKeyLine = (raw["publicKeyLine"] as? String)?.takeIf { it.isNotBlank() },
+            clearSecret = raw["clearSecret"] as? Boolean ?: false,
+            remoteForwardPort = (raw["forwardPort"] as? Number)?.toInt()
+                ?: app.grom.server.ssh.SshTarget.DEFAULT_FORWARD_PORT,
+            enabled = raw["enabled"] as? Boolean ?: true
+        )
+        val saved = sshStore.upsert(draft)
+        audited("ssh.target.save", "id=${saved.id} label=${saved.label}")
+        return Json.encode(mapOf("ok" to true, "target" to saved.toUiJson()))
+    }
+
+    fun sshDeleteTarget(id: String) {
+        sshTunnels.disconnect(id)
+        sshStore.delete(id)
+        audited("ssh.target.delete", "id=$id")
+    }
+
+    fun sshClearPin(id: String) {
+        sshTunnels.disconnect(id)
+        sshStore.clearPin(id)
+        audited("ssh.hostkey.clear", "target=$id")
+    }
+
+    /** Blocking network work; callers must not run this on the main thread. */
+    fun sshConnectJson(id: String, trustHostKey: String?): String {
+        val result = sshTunnels.connect(id, trustHostKey)
+        val body: Map<String, Any?> = when (result) {
+            is SshTunnelManager.Result.Connected -> mapOf(
+                "ok" to true,
+                "state" to "connected",
+                "fingerprint" to result.fingerprint,
+                "learned" to result.learned
+            )
+            is SshTunnelManager.Result.HostKeyUnverified -> mapOf(
+                "ok" to false,
+                "state" to "unverified",
+                "code" to "HOST_KEY_UNVERIFIED",
+                "fingerprint" to result.fingerprint
+            )
+            is SshTunnelManager.Result.HostKeyMismatch -> mapOf(
+                "ok" to false,
+                "state" to "failed",
+                "code" to "HOST_KEY_MISMATCH",
+                "pinned" to result.pinned,
+                "fingerprint" to result.observed
+            )
+            is SshTunnelManager.Result.Failed -> mapOf(
+                "ok" to false,
+                "state" to "failed",
+                "code" to result.code,
+                "message" to result.message
+            )
+        }
+        return Json.encode(body)
+    }
+
+    fun sshDisconnect(id: String) {
+        sshTunnels.disconnect(id)
+    }
+
+    // --------------------------------------------------- Lightning probe (D52)
+
+    fun lightningProbeJson(): String {
+        if (superServer.status()["running"] != true) {
+            return Json.encode(
+                mapOf(
+                    "ok" to false,
+                    "code" to "DATA_PLANE_STOPPED",
+                    "message" to "enable the public data plane and configure a backend first"
+                )
+            )
+        }
+        val result = superServer.probeLightning()
+        if (result["ok"] == true) {
+            audited("lightning.probe", "reachable=${result["reachable"]}")
+        } else {
+            safeAudit("lightning.probe.failed", "code=${result["code"]}")
+        }
+        return Json.encode(result)
+    }
+
+    /**
+     * The address a tunnel should forward to. It is the data plane's real
+     * listening address, so a tunnel never points at a port nothing serves.
+     */
+    private fun localDataPlane(): Pair<String, Int>? {
+        if (!running) return null
+        val config = superServer.currentConfig()
+        if (!config.enabled) return null
+        return when (val resolved = SuperBindPolicy.resolve(config.bind)) {
+            is BindResolution.Bound ->
+                if (SuperBindPolicy.isWildcard(resolved.address)) {
+                    "127.0.0.1" to config.port
+                } else {
+                    resolved.display to config.port
+                }
+            is BindResolution.Rejected -> null
         }
     }
 
@@ -558,6 +771,13 @@ class ServerRuntime(
 
     companion object {
         private const val TICK_MS = 1_000L
+
+        /** The version of the APK that hosts this code. */
+        fun hostVersion(context: Context): String = try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+        } catch (_: Exception) {
+            "unknown"
+        }
         private val LIVE_STATES = setOf(AgentState.STARTING, AgentState.READY)
 
         /** Single source of truth, shared with the agent (see AgentChannel). */

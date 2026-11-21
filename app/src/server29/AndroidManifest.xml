@@ -1,19 +1,20 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Server-only surface (D2, S1-R006). The peripheral flavour does not
-         declare the service, so it cannot be started and cannot bind. -->
+    <!-- Server-only surface (D2, S1-R006, D55). The service itself is declared
+         by :engine with exported="false"; the standalone role replaces that
+         declaration with the public, signature-gated one below. The peripheral
+         flavour never declares the receiver and never starts the service. -->
 
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application>
         <service
             android:name="app.grom.server.service.GromService"
             android:exported="true"
             android:foregroundServiceType="specialUse"
-            android:permission="app.grom.sdk.ipc.BIND_GROMSERVER">
+            android:permission="app.grom.sdk.ipc.BIND_GROMSERVER"
+            tools:node="replace">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="loopback-only local automation server" />

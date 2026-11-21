@@ -16,6 +16,7 @@ object GromPrefs {
     private const val KEY_PORT = "port"
     private const val KEY_QUARANTINED = "quarantined"
     private const val KEY_QUARANTINE_REASON = "quarantine_reason"
+    private const val KEY_SECTION_PREFIX = "section_open_"
 
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -41,6 +42,17 @@ object GromPrefs {
 
     fun quarantineReason(context: Context): String? =
         prefs(context).getString(KEY_QUARANTINE_REASON, null)
+
+    /**
+     * Dashboard sections remember whether the operator left them open (D56).
+     * This is presentation state only: no security decision depends on it.
+     */
+    fun sectionOpen(context: Context, key: String, default: Boolean): Boolean =
+        prefs(context).getBoolean(KEY_SECTION_PREFIX + key, default)
+
+    fun setSectionOpen(context: Context, key: String, open: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SECTION_PREFIX + key, open).apply()
+    }
 
     fun setQuarantined(context: Context, reason: String?) {
         prefs(context).edit()

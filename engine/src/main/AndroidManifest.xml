@@ -1,0 +1,31 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Permissions the engine's foreground service needs. Declaring them in the
+         library means a host application that embeds the engine gets a working
+         service without copying manifest entries by hand. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <!--
+          Embedded default (D55): the service is private to the host application
+          and carries no IPC permission. A host that wants to expose the Binder
+          surface declares it explicitly.
+
+          The standalone Grom server role replaces this element with
+          tools:node="replace" (app/src/server29/AndroidManifest.xml) and adds
+          exported="true" plus the signature permission. `GromService` itself
+          applies the per-transaction signature check in both cases.
+        -->
+        <service
+            android:name="app.grom.server.service.GromService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="loopback-only local automation server" />
+        </service>
+    </application>
+</manifest>

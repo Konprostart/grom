@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "grom"
 
 include(":sdk")
+include(":engine")
 include(":app")
 include(":testapps:samecert")
 include(":testapps:foreigncert")
