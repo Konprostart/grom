@@ -239,3 +239,19 @@ pin and the observed value and MUST NOT connect.
 measured result. It MUST NOT report `reachable: true` without a successful
 backend probe, and it MUST answer `DATA_PLANE_STOPPED` when the public plane is
 not running.
+
+### S4-R040 (API 4)
+`projectExec(projectId, op, argsJson)` MUST be the only project-facing data
+path. It MUST compute the storage key as `p:<projectId>:<key>`, MUST refuse a
+key that already carries a foreign `p:` prefix (`PROJECT_KEY_INVALID`), MUST
+refuse an unregistered project (`PROJECT_NOT_REGISTERED`), MUST accept only
+`kv.get` and `kv.put`, and MUST return `{"status":…,"body":…}` so a
+`503 STORAGE_UNAVAILABLE` from the agent is visible as such. It MUST apply the
+same per-transaction signature gate as every other method.
+
+### S4-R041 (API 4)
+`GromProject` MUST map that envelope onto a typed result where a missing
+`node:sqlite` is `StorageUnavailable` and never `Ok`. `GromEmbed.start` with a
+project registration MUST repeat the announcement every 30 s by default (clamped
+to 5 s … 10 min) until `GromEmbed.stop`, so the dashboard's `alive` state is
+derived from an ongoing heartbeat rather than a single claim.

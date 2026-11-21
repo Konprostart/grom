@@ -82,11 +82,17 @@ Fingerprints use the OpenSSH `SHA256:…` form, the same string as
 
 | Limit | Value |
 |---|---|
-| Saved targets | 8 |
+| Saved targets | none (bounded only by the 512 KiB store, D64) |
 | Simultaneously active tunnels | 2 |
 | Connect / auth timeout | 15 s each |
 | Remote bind address | `127.0.0.1` on the VPS |
 | Forward port | per target, default 47002 |
+
+Saved servers are not capped: the count limit was removed because adding a
+server costs no phone resource, and the store refuses an over-size write with
+`SSH_STORE_FULL` instead of silently dropping records. Live tunnels are capped
+at two, and the screen says so as soon as a third server is saved (the extra
+servers stay idle).
 
 The tunnel refuses to start when the public data plane is not running
 (`DATA_PLANE_NOT_RUNNING`): pointing a public port at a closed one would be a

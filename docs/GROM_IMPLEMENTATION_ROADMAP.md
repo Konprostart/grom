@@ -13,6 +13,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **0 — F1 walking skeleton** | **done** | `docs/F1-implementation-plan.md` §Status, 9/9 steps |
 | **1A — reference configuration** | **done** | `npub` (NIP-19), `relays` (reference only), `remoteBridge` (label/description), exposed in authenticated `/v1/status` and the sanitized Copy-config export; D52–D54 |
 | **1C — embeddable engine, dashboard, SSH bridge** | **done** | `engine/` library, `GromEmbed`, API 3, `projects/`, `ssh/`, `DashboardModel`, sections UI; D55–D60 |
+| **1D — integration ergonomics** | **done** | `ProjectNamespace` + API 4 `projectExec` (D61), `GromProject`, real heartbeat in `GromEmbed`, "How Grom works" section (D62), external Lightning node reference (D63), unlimited saved SSH servers (D64) |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -20,7 +21,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.6.0` (versionCode 6). The nine gates in `tools/run-gates` are
+Current version: `0.7.0` (versionCode 7). The nine gates in `tools/run-gates` are
 the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
@@ -146,7 +147,9 @@ Delivered:
 | file | what it is |
 |---|---|
 | `engine/` | the server as an Android library (`app.grom.engine`); every server package moved here, `app/` is a host |
-| `engine/.../embed/GromEmbed.kt` | consent, start, embedded client, bounded project registration |
+| `engine/.../embed/GromEmbed.kt` | consent, start, embedded client, heartbeat, bounded project registration |
+| `engine/.../embed/GromProject.kt` | typed registration, heartbeat, namespaced `put`/`get` (D61) |
+| `engine/.../projects/ProjectNamespace.kt` | `p:<projectId>:` prefix, ownership gate |
 | `engine/.../projects/ProjectRegistry.kt` | project records with heartbeat-derived `alive`/`stale`, atomic file, 8 projects |
 | `engine/.../ssh/SshTarget.kt` | target model, validators, draft, limits (8 targets, 2 active) |
 | `engine/.../ssh/SshTargetStore.kt` | sealed secrets, TOFU pin storage, no plaintext on disk |

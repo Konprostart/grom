@@ -81,7 +81,9 @@ val result = GromEmbed.start(
         projectId = "my-wallet",           // ^[a-z][a-z0-9-]{1,31}$
         projectTitle = "My Wallet",        // <= 64 chars
         projectVersion = "1.2.0",
-        capabilities = setOf("kv", "lightning.ref")
+        capabilities = setOf("kv", "lightning.ref"),
+        heartbeat = true,                  // repeat the announcement (default)
+        heartbeatIntervalMs = 30_000       // clamped to 5 s … 10 min
     )
 ) { registered ->                      // runs on a background thread
     if (!registered) Log.w("Grom", "project registration did not complete")
@@ -97,7 +99,7 @@ missing. Ask the server for the truth:
 ```kotlin
 val client = GromEmbed.newClient(context)   // Target.EMBEDDED
 client.bind(object : GromClient.Listener {
-    override fun onConnected(apiVersion: Int) { /* apiVersion == 3 */ }
+    override fun onConnected(apiVersion: Int) { /* apiVersion == 4 */ }
     override fun onDisconnected(reason: String) { /* show the reason */ }
 })
 val status = client.call(null) { it.statusJson() }
@@ -106,12 +108,14 @@ val status = client.call(null) { it.statusJson() }
 `GromEmbed.newClient` uses the host's own package; the signature gate passes by
 construction because caller and service are the same UID.
 
-`GromEmbed.stop(context)` stops the service. Tokens, projects and settings stay
-on disk.
+A heartbeat is started for you: the announcement repeats every 30 seconds on a
+daemon thread and stops with `GromEmbed.stop(context)` (or `stopHeartbeat()` if
+the host wants to keep the server up). Tokens, projects and settings stay on
+disk.
 
 ---
 
-## 4. The API 3 surface
+## 4. The API 4 surface
 
 | Method | Purpose |
 |---|---|
@@ -119,7 +123,8 @@ on disk.
 | `announceProject(json)` | register or heartbeat; returns the stored record |
 | `removeProject(id)` | unregister |
 | `configExportJson()` | sanitised hand-off document (D53) |
-| `agentExec(op, args)` | whitelisted agent op, returned verbatim |
+| `agentExec(op, args)` | whitelisted agent op, returned verbatim (operator surface) |
+| `projectExec(projectId, op, args)` | **API 4**: `kv.get`/`kv.put` inside the caller's namespace |
 | `sshStatusJson()` … `sshClearPin(id)` | the operator's SSH bridge (D58) |
 | `lightningProbeJson()` | run the Lightning `health` op now |
 
@@ -133,19 +138,54 @@ A project is `alive` only while it keeps announcing: the record is refreshed by
 heartbeat, then `stale`. Nothing in the document can set `alive` directly, and
 registration is not evidence that a process is running.
 
-Recommended heartbeat: every 30 seconds while the host is in the foreground. A
-host that stops (process death, user swipe-away) becomes `stale` on its own.
+`GromEmbed.start` implements that heartbeat (30 s, three misses to go stale). A
+host that stops — process death, user swipe-away — becomes `stale` on its own.
+Use `GromProject.startHeartbeat` instead if you bind the client yourself.
 
-### Local data
+### Local data (API 4)
 
-The agent's `kv.*` ops are available through `agentExec`. Namespace keys per
-project (`p:<projectId>:<key>`) so two embedded projects cannot read each
-other's values. Without `node:sqlite` the call answers
-`503 STORAGE_UNAVAILABLE`; it never fakes a successful write.
+Use the typed handle rather than hand-built JSON:
+
+```kotlin
+val client = GromEmbed.newClient(context)
+client.bind(listener)                              // wait for onConnected
+val project = GromEmbed.newProject(client, "my-wallet")
+
+when (val write = project.put("theme", "dark")) {
+    is GromProject.LocalWrite.Ok -> { /* stored: ${write.found} */ }
+    GromProject.LocalWrite.StorageUnavailable -> show("local storage is not available")
+    is GromProject.LocalWrite.Rejected -> show("${write.code}: ${write.message}")
+}
+
+val read = project.get("theme")                    // same sealed result type
+```
+
+The engine computes the storage key as `p:<projectId>:<key>` and accepts only
+`kv.get`/`kv.put` on this path (`projectExec`). A key that already carries a
+foreign `p:` prefix is refused with `PROJECT_KEY_INVALID`, an unregistered
+project with `PROJECT_NOT_REGISTERED`, and a value over 32 KiB with
+`VALUE_TOO_LARGE`. Without `node:sqlite` the call answers
+`503 STORAGE_UNAVAILABLE`, which the SDK surfaces as `StorageUnavailable` — it
+never fakes a successful write.
+
+**Scope of the guarantee.** The namespace is an ownership gate on the API, not a
+sandbox. Applications in the *same UID* are one trust domain: one that chose to
+lie could announce its neighbour's id. Real isolation needs separate UIDs or
+signatures, i.e. the standalone + `signature` model. Do not describe the
+namespace as a security boundary between co-installed apps.
 
 ---
 
-## 5. What changes at the trust boundary
+## 5. Distributing the library
+
+The engine and the SDK are published as source modules in this repository
+(`include(":engine")`, `include(":sdk")`). There is no AAR on a registry yet:
+until the API stops moving, a versioned AAR would be a second artifact to keep
+in sync, and `include` gives the host the same code the tests build. A host
+that wants a single artifact can run `./gradlew :engine:assembleRelease` and
+consume the local AAR; see `RELEASING.md`.
+
+## 6. What changes at the trust boundary
 
 Embedding means the host's UID owns the server. That is the point — and it is
 also the cost:

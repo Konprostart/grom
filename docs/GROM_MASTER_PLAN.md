@@ -49,7 +49,7 @@ A claim without a tag is a statement about the plan, not about the product.
 | Node 24.22.3 bionic arm64 runs, including `node:sqlite` | `[SHIPPED]` as a host-executed artefact — `scripts/fetch-node-android.sh --verify` |
 | Super server: password + Ed25519, SSE, plugins, bounds | `[SHIPPED]` at JVM-test level — S5, `SuperServerIntegrationTest` |
 | Reference config (`npub`, `relays`, `remoteBridge`) | `[SHIPPED]` — D52–D54, S5-R032–R034; validated, reference-only, in authenticated `/v1/status` and the sanitized Copy-config export |
-| Embeddable engine (`:engine`) + API 3 | `[SHIPPED]` at JVM-test level — D55, `GromEmbed`, `ProjectRegistryTest`; manifests proven by policy checks 25/26 |
+| Embeddable engine (`:engine`) + API 4 | `[SHIPPED]` at JVM-test level — D55/D61, `GromEmbed`, `GromProject`, `ProjectNamespace`, `ProjectRegistry`; manifests proven by policy checks 25/26, namespace by 30 |
 | Dashboard lamps and collapsible sections | `[SHIPPED]` at JVM-test level — D56, `DashboardModelTest` |
 | Project registry with heartbeat-derived liveness | `[SHIPPED]` at JVM-test level — D57, `ProjectRegistryTest` |
 | Reverse SSH bridge (TOFU, `tcpip-forward` only) | `[SHIPPED]` against a real in-process SSH server — D58, `SshTunnelManagerTest`; **not** on hardware |

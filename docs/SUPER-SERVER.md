@@ -62,7 +62,12 @@ file falls back to the safe defaults and the reason appears in
     "kind": "none",
     "baseUrl": "",
     "timeoutMs": 8000,
-    "apiKeySealed": "<base64-sealed-api-key-or-null>"
+    "apiKeySealed": "<base64-sealed-api-key-or-null>",
+    "externalNode": {
+      "kind": "none",
+      "label": "",
+      "endpointHint": ""
+    }
   },
   "acknowledgePublicBind": false,
   "sessionTtlMs": 43200000,
@@ -92,6 +97,11 @@ Field notes:
   guessed. Only the app's Lightning dialog produces a valid value, so do not
   hand-write this field.
 - `lightning.kind` is the lowercase wire name: `none` or `lnbits`.
+- `lightning.externalNode` (D63) is a **reference** to a node on the operator's
+  own server: `kind` (`none`, `lnd`, `cln`, `nwc`), a label (≤ 64) and an
+  endpoint hint (`host` or `host:port`, ≤ 253, never a URL). Grom opens no
+  gRPC/NWC/socket connection to it. `endpointHint` stays on the device:
+  `/v1/status` and *Copy config* publish `kind`, `label` and `configured` only.
 - `npub` (D52) is the operator's Nostr **public** key: a NIP-19 `npub1…`
   (bech32, 32-byte payload) or a 64-character hex key, stored in canonical
   lowercase form. An `nsec1…` secret key is rejected. Grom never signs.
@@ -113,9 +123,10 @@ Field notes:
   status address rather than assuming the file was honoured.
 - A malformed `relay` is **not** silently dropped on load: validation reports
   `BAD_RELAY`, so a typo cannot quietly disappear from the list.
-- Changing only `npub`, `relays` or `remoteBridge` is applied **in place**: the
-  listener is not restarted and active sessions/SSE streams survive (D54).
-  Changing anything else rebuilds the plane and invalidates sessions.
+- Changing only `npub`, `relays`, `remoteBridge` or `lightning.externalNode` is
+  applied **in place**: the listener is not restarted and active sessions/SSE
+  streams survive (D54, S5-R041). Changing anything else rebuilds the plane and
+  invalidates sessions.
 - `version` is written for future format changes and is not currently read.
 
 ## 3. curl recipes
@@ -353,7 +364,7 @@ anyone who reaches the port can read (D39).
 
 ## 10. Reference config for an external VPS bridge
 
-Grom can hold three pieces of **reference configuration** for a bridge that runs
+Grom can hold four pieces of **reference configuration** for a bridge that runs
 elsewhere — for example a Nostr/Lightning service on a VPS (D52):
 
 ```json
@@ -362,6 +373,9 @@ elsewhere — for example a Nostr/Lightning service on a VPS (D52):
 "remoteBridge": {
   "label": "Mostro VPS",
   "description": "SSH reverse tunnel; Grom does not start it"
+},
+"lightning": {
+  "externalNode": { "kind": "lnd", "label": "VPS node", "endpointHint": "" }
 }
 ```
 
@@ -373,6 +387,8 @@ actually been probed; Grom does not turn "configured" into "healthy".
 What Grom does **not** do with it:
 
 - it does not open a WebSocket to a relay;
+- it does not open a gRPC, NWC or socket connection to `externalNode`
+  (`endpointHint` never leaves the device);
 - it does not sign a Nostr event (it never has a private key — an `nsec1…`
   value is refused);
 - it does not start, supervise or health-check a tunnel.

@@ -182,10 +182,29 @@ GromEmbed.recordConsent(context)
 GromEmbed.start(context, GromEmbed.Options("my-wallet", "My Wallet", "1.2.0"))
 ```
 
-The project then appears in **Local projects** with a lamp driven by its
-heartbeat, and can call the agent through `agentExec`. See
-[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the API 3 surface, the runtime
+The project then appears in **Local projects** with a lamp driven by its real
+heartbeat (30 s, three misses to go stale). Local data goes through the typed
+handle, and the engine adds the namespace prefix itself:
+
+```kotlin
+val project = GromEmbed.newProject(client, "my-wallet")
+when (val write = project.put("theme", "dark")) {
+    is GromProject.LocalWrite.Ok -> { /* stored */ }
+    GromProject.LocalWrite.StorageUnavailable -> show("local storage unavailable")
+    is GromProject.LocalWrite.Rejected -> show("${write.code}: ${write.message}")
+}
+```
+
+That namespace (`p:<projectId>:<key>`, API 4 `projectExec`) is an ownership gate
+on the API, not a sandbox between apps in the same UID. See
+[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the API 4 surface, the runtime
 requirement and the trust-boundary cost.
+
+## How Grom works
+
+The last section of the app explains, in plain language, what Grom does, why most
+people need no rented server, and when an external SSH server helps. It is
+static and reports no state, so it cannot claim anything is running.
 
 ## Reverse SSH bridge
 

@@ -390,3 +390,19 @@ The sanitised export MUST include `bridge` and `projects` and MUST continue to
 omit every credential. The static gate asserts that `ConfigExport` and
 `SuperStatusDocument` contain no credential identifier, and the sentinel test
 asserts that no SSH address, password hash or sealed key reaches the document.
+
+### S5-R039
+`lightning.externalNode` MUST be treated as reference configuration: no gRPC
+channel, no NWC connection, no socket. A URL-shaped endpoint, a kind-less record
+or a value that looks like a secret MUST be refused with `BAD_EXTERNAL_NODE`.
+
+### S5-R040
+`/v1/status` and the sanitised export MUST publish `externalNode` as `kind`,
+`label` and `configured` only. `endpointHint` MUST NOT appear in either
+document; the static gate asserts the file opens no connection and the sentinel
+test asserts the endpoint text is absent.
+
+### S5-R041
+A change that only touches reference fields — `npub`, `relays`, `remoteBridge`
+or `lightning.externalNode` — MUST NOT restart the listener or drop sessions
+(extends D54).

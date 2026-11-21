@@ -127,7 +127,25 @@ produced with Grom's keystore key; do not put a plaintext key in the file, and
 expect an unreadable sealed value to be reported as unconfigured, not guessed. A
 hand-edited file is read at the next server start.
 
-## 6. Adding another backend
+## 6. A node on your own server (reference only, D63)
+
+Operators who run LND, Core Lightning or an NWC bridge on a VPS can describe
+that node in the *External node* row of the **Nostr & Lightning** section:
+`kind` (`lnd`/`cln`/`nwc`), a label and an endpoint hint (`host` or
+`host:port`).
+
+This is a **reference**, not a client. Grom opens no gRPC channel, no NWC
+connection and no socket to that node; the heavy daemon stays on your server and
+the phone keeps only the description. `endpointHint` never leaves the device:
+`/v1/status` and *Copy config* carry `kind`, `label` and `configured` only.
+Editing the reference does not restart the listener or drop sessions.
+
+A URL-shaped endpoint, a record with no kind, or anything that looks like a
+secret (`nsec1`, a PEM key, `password=`, `token=`, `api_key=`, `secret=`) is
+refused with `BAD_EXTERNAL_NODE`, so a key pasted into the wrong box is
+reported instead of stored.
+
+## 7. Adding another backend
 
 LND and Core Lightning can be supported without changing the API: implement the
 adapter interface and register it. The interface is
@@ -178,7 +196,7 @@ capability would need a market-data source the adapter author supplies; LND
 itself has no order book. Those are backend semantics, not Grom features, and
 must be implemented and documented by the adapter author.
 
-## 7. What a P2P exchange needs beyond this layer
+## 8. What a P2P exchange needs beyond this layer
 
 This layer can report a balance, create an invoice, check it and pay one. A
 peer-to-peer Lightning exchange needs considerably more, and **Grom provides none
@@ -198,7 +216,7 @@ as an exchange by itself. A phone behind CGNAT also has no reachable inbound
 address; the peer-facing side must use an outbound tunnel (WireGuard, Tailscale,
 SSH) initiated from the device, or a backend hosted somewhere reachable.
 
-## 8. Security notes
+## 9. Security notes
 
 - The backend URL must start with `https://`; a plain-http URL is refused at
   configuration time with `INSECURE_BACKEND_URL`. The adapter constructor
@@ -220,7 +238,7 @@ SSH) initiated from the device, or a backend hosted somewhere reachable.
   deleted or rotated keystore key makes the stored value unreadable; the backend
   becomes unconfigured, never a crash and never a plaintext fallback.
 
-## 9. Test status
+## 10. Test status
 
 The Lightning adapter has JVM unit tests only. `LightningPluginTest` uses a fake
 backend and `LnbitsBackendTest` uses an injected transport, so neither opens a

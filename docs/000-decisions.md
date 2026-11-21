@@ -799,3 +799,90 @@ keeps the private key out of every file, backup and bug report.
 
 *Enforced by:* `SshKeysTest` (round-trip through MINA's loader), `SshTargetStoreTest`
 (no plaintext on disk), `tools/test-policy` 28.
+
+## D61 — Project key/value access is namespaced by the engine, per project
+**ACCEPTED.** Every key written on behalf of a project is stored as
+`p:<projectId>:<key>`. The prefix is computed in `ProjectNamespace`, never taken
+from the request, and a key that already carries a foreign `p:` prefix is
+refused with `PROJECT_KEY_INVALID`. The new API 4 method
+`projectExec(projectId, op, argsJson)` is the only project-facing data path: it
+accepts `kv.get`/`kv.put` only, requires the project to be registered
+(`PROJECT_NOT_REGISTERED`), caps a value at 32 KiB (`VALUE_TOO_LARGE`) and
+routes the call through the normal agent whitelist.
+
+Scope, stated plainly in `docs/EMBEDDING.md`: this is an ownership gate on the
+API surface, not a sandbox. Applications inside the **same UID** are one trust
+domain; a deliberately malicious one could announce another project's id.
+Isolation between applications needs separate UIDs or signatures, which is what
+the standalone + `signature` model provides (D15, D55).
+
+The SDK was also given what it was missing: `GromProject` (typed registration,
+heartbeat, `put`/`get`, `configExport`, `probeLightning`) and a real heartbeat
+in `GromEmbed.start`. Before this decision the documentation recommended a
+30-second heartbeat that no code implemented.
+
+*Why:* a documented boundary that only a convention does not protect anything,
+and hand-built JSON in every host app is both a bug farm and a way to silently
+bypass the namespace.
+
+*Enforced by:* `ProjectNamespaceTest`, `GromProjectTest`, `tools/test-policy` 30,
+`DashboardModelTest`.
+
+## D62 — "How Grom works" is static, last, and closed by default
+**ACCEPTED.** A fourth section at the bottom of the screen explains, in plain
+language: what Grom does, why most people need no rented server, and when an
+external SSH server helps. The content lives in `HelpModel` + `strings.xml`, is
+fixed at three blocks, and reports no state.
+
+The test asserts the block count and order, that every string exists, and that
+the text contains no URL, no currency, no `balance`, no `payout`, and no uptime
+promise. The only honesty claim it is allowed to make is that a down link is
+shown as down.
+
+*Why:* an explanation that reads state would be one more place to lie. Keeping
+it static lets the gate prove what it promises.
+
+*Enforced by:* `HelpModelTest`.
+
+## D63 — An external Lightning node is a reference, never a client
+**ACCEPTED.** `LightningSettings.externalNode` describes a node on the
+operator's own server: `kind` (`lnd`/`cln`/`nwc`), a label, and an endpoint hint
+of the form `host` or `host:port`. Grom opens no gRPC channel, no NWC
+connection and no socket to it; LND, CLN and NWC stay on the VPS (the operator's
+Q4 answer).
+
+Validation refuses a kind-less record (`BAD_EXTERNAL_NODE`), a URL-shaped
+endpoint, oversized fields, and anything that looks like a secret — the same
+anti-secret rule as the bridge hint (`nsec1`, PEM, `password=`, `token=`,
+`api_key=`, `secret=`).
+
+`endpointHint` never leaves the device: `/v1/status` and `ConfigExport` carry
+`kind`, `label` and `configured` only. Changing the reference does not restart
+the listener (`sameRuntimePolicy` ignores it, extending D54).
+
+*Why:* the address of the operator's infrastructure is exactly the kind of
+detail D59 already keeps off the data plane. Storing a description is useful;
+dialling it from a phone would be neither safe nor honest.
+
+*Enforced by:* `ExternalNodeRefTest`, `SuperServerConfigTest`,
+`SuperStatusDocumentTest`, `ConfigExportTest` (endpoint sentinel),
+`tools/test-policy` 31.
+
+## D64 — Saved SSH servers are unlimited; only live tunnels are capped
+**ACCEPTED.** The saved-target count cap was removed. The only bound is the
+store's 512 KiB file limit, enforced **at write time** with `SSH_STORE_FULL`:
+an over-size write would otherwise make every record unreadable on the next
+start, which is silent data loss. `MAX_ACTIVE = 2` stays, because each live
+tunnel costs a thread, a socket, an SSH session and a MINA transport.
+
+The UI and `sshStatusJson()` show an advisory once more than two servers are
+saved (`ssh_advisory`, `EXTRA_SERVERS_IDLE`): extra servers stay idle until the
+operator connects them, and the screen says so rather than pretending the limit
+is storage.
+
+*Why:* the operator asked to stop being told "no" for saving a server, while the
+phone still must not be over-committed. Two different limits deserve two
+different messages.
+
+*Enforced by:* `SshTargetStoreTest` (no count cap; full store refuses the write
+and stays readable), `tools/test-policy`.

@@ -3,9 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47 and S1-R002…S1-R012, S5-R001…S5-R026.
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D64 and S1-R002…S1-R012,
+# S5-R001…S5-R041.
 #
-# The gate is intentionally a fixed count: "29/29" is the number of passes.
+# The gate is intentionally a fixed count: "31/31" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -93,9 +94,9 @@ check "boot restart is opt-in" \
 check "boot respects quarantine" \
   grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
 
-# 15. every IPC transaction checks signatures (API 3 has 15 transactions)
+# 15. every IPC transaction checks signatures (API 4 has 22 transactions)
 check "every IPC transaction applies the signature gate" \
-  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 15 ]"
+  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 22 ]"
 
 # 16. cleartext outbound traffic is not enabled
 check "no usesCleartextTraffic" \
@@ -163,6 +164,17 @@ check "no committed private key material" \
 #     subsystem, and the client-side filter allows only the local data plane.
 check "sshd surface is tcpip-forward only" \
   bash -c "! grep -rnE 'createExecChannel|createShellChannel|createSubsystemChannel' $MAIN --include='*.kt' && grep -q 'startRemotePortForwarding' $MAIN/ssh/SshTunnelManager.kt && grep -q 'SshForwardingPolicy' $MAIN/ssh/SshTunnelManager.kt"
+
+# 30. a project reaches only its own key namespace (D61). The prefix is
+#     computed by the engine, the op list is fixed, and an unregistered project
+#     is refused; none of that may be left to the caller.
+check "project key/value ops are namespaced by the engine" \
+  bash -c "grep -q 'ProjectNamespace.buildRequest(projectId' $MAIN/ServerRuntime.kt && grep -q 'fun buildRequest' $MAIN/projects/ProjectNamespace.kt && grep -q 'to scope(projectId, rawKey)' $MAIN/projects/ProjectNamespace.kt && grep -q 'PROJECT_KEY_INVALID' $MAIN/projects/ProjectNamespace.kt && grep -q 'PROJECT_NOT_REGISTERED' $MAIN/ServerRuntime.kt && grep -q 'String projectExec' sdk/src/main/aidl/app/grom/sdk/ipc/IGromServer.aidl"
+
+# 31. the external Lightning node is a reference, not a client (D63): no gRPC,
+#     no NWC, no socket, and no outbound URL in that file.
+check "external node reference opens no connection" \
+  bash -c "! grep -rnE 'Socket\s*\(|openConnection|HttpURLConnection|okhttp|java\.net\.URL|ManagedChannel|grpc' $MAIN/superserver/plugins/lightning/ExternalNodeRef.kt"
 
 echo
 TOTAL=$((PASS + FAIL))
