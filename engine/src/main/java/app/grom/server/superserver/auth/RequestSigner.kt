@@ -99,14 +99,7 @@ class RequestSigner(
         body: String,
         timestamp: String,
         nonce: String
-    ): String = buildString {
-        append(SCHEME).append('\n')
-        append(method.uppercase()).append('\n')
-        append(path).append('\n')
-        append(timestamp).append('\n')
-        append(nonce).append('\n')
-        append(sha256Hex(body.toByteArray(Charsets.UTF_8)))
-    }
+    ): String = canonicalString(method, path, body, timestamp, nonce)
 
     /**
      * Verifies the four `x-grom-*` headers. Header names are looked up through
@@ -184,16 +177,6 @@ class RequestSigner(
         return null
     }
 
-    private fun sha256Hex(bytes: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
-        val out = StringBuilder(digest.size * 2)
-        for (byte in digest) {
-            val value = byte.toInt() and 0xff
-            out.append(HEX[value ushr 4]).append(HEX[value and 0x0f])
-        }
-        return out.toString()
-    }
-
     companion object {
         const val HEADER_KEY: String = "x-grom-key"
         const val HEADER_TIMESTAMP: String = "x-grom-timestamp"
@@ -208,5 +191,35 @@ class RequestSigner(
         private val NONCE_PATTERN = Regex("[A-Za-z0-9_-]{8,128}")
         private val HEX = "0123456789abcdef".toCharArray()
         private val DECODERS = listOf(Base64.getDecoder(), Base64.getUrlDecoder())
+
+        /**
+         * The signed string, shared by the verifier and every signer (the fleet
+         * client included). Keeping one implementation is what stops a client
+         * and the server drifting into two incompatible formats.
+         */
+        fun canonicalString(
+            method: String,
+            path: String,
+            body: String,
+            timestamp: String,
+            nonce: String
+        ): String = buildString {
+            append(SCHEME).append('\n')
+            append(method.uppercase()).append('\n')
+            append(path).append('\n')
+            append(timestamp).append('\n')
+            append(nonce).append('\n')
+            append(sha256Hex(body.toByteArray(Charsets.UTF_8)))
+        }
+
+        private fun sha256Hex(bytes: ByteArray): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+            val out = StringBuilder(digest.size * 2)
+            for (byte in digest) {
+                val value = byte.toInt() and 0xff
+                out.append(HEX[value ushr 4]).append(HEX[value and 0x0f])
+            }
+            return out.toString()
+        }
     }
 }

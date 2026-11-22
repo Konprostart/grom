@@ -75,6 +75,25 @@ class ConfigExportTest {
     }
 
     @Test
+    fun theFleetBlockCarriesThisDeviceButNeverAPeerAddress() {
+        val out = ConfigExport.render(
+            config,
+            mapOf("configured" to true),
+            fleet = mapOf(
+                "nodeId" to "0123456789abcdef",
+                "label" to "Pixel 7",
+                // Deliberately smuggled in: the export must not copy it.
+                "address" to "http://192.168.77.77:47002"
+            )
+        )
+        val fleet = JsonParser.parseObjectOrNull(out)!!["fleet"] as Map<*, *>
+        assertEquals("0123456789abcdef", fleet["nodeId"])
+        assertEquals("Pixel 7", fleet["label"])
+        assertEquals(setOf("nodeId", "label"), fleet.keys)
+        assertFalse("a peer address leaked", out.contains("192.168.77.77"))
+    }
+
+    @Test
     fun neverLeaksAStoredSecretOrKeyMaterial() {
         val out = ConfigExport.render(config, mapOf("configured" to true))
         assertFalse("password hash leaked", out.contains(passwordHash))

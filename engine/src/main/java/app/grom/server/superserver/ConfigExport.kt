@@ -27,7 +27,8 @@ object ConfigExport {
         lightning: Map<String, Any?>,
         projects: List<Map<String, Any?>> = emptyList(),
         bridge: Map<String, Any?> = emptyMap(),
-        notifications: Map<String, Any?> = emptyMap()
+        notifications: Map<String, Any?> = emptyMap(),
+        fleet: Map<String, Any?> = emptyMap()
     ): String = Json.encode(
         linkedMapOf(
             "source" to SOURCE,
@@ -70,6 +71,13 @@ object ConfigExport {
                     "atMs" to (((notifications["lastDelivery"] as? Map<*, *>)
                         ?.get("atMs") as? Number)?.toLong() ?: 0L)
                 )
+            ),
+            // This device's identity only. A paired-device roster is device
+            // state: it names and locates other machines, so it stays on the
+            // phone and is never part of a document that leaves it (D59, D73).
+            "fleet" to linkedMapOf(
+                "nodeId" to (fleet["nodeId"] as? String),
+                "label" to (fleet["label"] as? String)
             ),
             "dataPlane" to linkedMapOf(
                 "enabled" to config.enabled,

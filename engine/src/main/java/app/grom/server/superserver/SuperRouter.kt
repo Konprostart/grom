@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package app.grom.server.superserver
 
+import app.grom.server.cluster.PairingPort
+import app.grom.server.cluster.PeerScope
 import app.grom.server.core.Token
 import app.grom.server.http.HttpRequest
 import app.grom.server.http.Json
@@ -49,6 +51,10 @@ class SuperRouter(
     private val events: EventBus,
     private val uptimeMs: () -> Long,
     private val serverStatus: () -> Map<String, Any?>,
+    /** Pairing routes, live only while an operator has opened a session (D71). */
+    private val pairing: PairingPort = PairingPort.DISABLED,
+    /** The sanitised hand-off document served at `GET /v1/config` (D53). */
+    private val configExport: () -> String = { "{}" },
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
 
@@ -85,38 +91,84 @@ class SuperRouter(
             )
         }
 
-        val outcome = auth.authenticate(request.method, path, request.body, request::header)
-        if (outcome is SuperAuth.Outcome.Rejected) return rejected(outcome)
+        // Pairing is the only pre-authenticated surface, and only while a
+        // session is open; a closed device answers every pairing route with the
+        // session-closed refusal instead of exposing a hint of a surface.
+        if (path == PAIR_IDENTITY || path == PAIR_HELLO || path == PAIR_POLL) {
+            return pairingRoute(path, request, client)
+        }
+
+        val authenticated = when (
+            val outcome = auth.authenticate(request.method, path, request.body, request::header)
+        ) {
+            is SuperAuth.Outcome.Rejected -> return rejected(outcome)
+            is SuperAuth.Outcome.Authenticated -> outcome
+        }
+        val principal = authenticated.principal
 
         return when {
             path == STATUS -> {
                 if (request.method != "GET") return methodNotAllowed(request.method, "GET")
+                if (!hasScope(principal, PeerScope.STATUS_READ)) return scopeRequired()
                 json(200, statusPayload())
             }
 
+            path == CONFIG -> {
+                if (request.method != "GET") return methodNotAllowed(request.method, "GET")
+                if (!hasScope(principal, PeerScope.CONFIG_READ)) return scopeRequired()
+                SuperResponse.Json(200, configExport())
+            }
+
             path == LOGOUT -> {
+                if (principal !is SuperAuth.Principal.Operator) return scopeRequired()
                 if (request.method != "POST") return methodNotAllowed(request.method, "POST")
                 auth.revoke(Token.fromHeaders(request.header("authorization"), request.header("x-grom-token")))
                 json(200, mapOf("ok" to true))
             }
 
             path == PLUGINS -> {
+                if (principal !is SuperAuth.Principal.Operator) return scopeRequired()
                 if (request.method != "GET") return methodNotAllowed(request.method, "GET")
                 json(200, mapOf("ok" to true, "plugins" to plugins.all().map(::describe)))
             }
 
             path == EVENTS -> {
+                if (principal !is SuperAuth.Principal.Operator) return scopeRequired()
                 if (request.method != "GET") return methodNotAllowed(request.method, "GET")
                 eventStream()
             }
 
-            path.startsWith("$PLUGINS/") -> pluginRoute(path, request)
+            path.startsWith("$PLUGINS/") -> {
+                if (principal !is SuperAuth.Principal.Operator) return scopeRequired()
+                pluginRoute(path, request)
+            }
 
             else -> error(404, "NOT_FOUND", "no such endpoint")
         }
     }
 
     // ------------------------------------------------------------------ routes
+
+    /** The three pairing routes: unsigned, but live only inside a session. */
+    private fun pairingRoute(path: String, request: HttpRequest, client: String): SuperResponse {
+        if (path == PAIR_IDENTITY) {
+            if (request.method != "GET") return methodNotAllowed(request.method, "GET")
+            val document = pairing.identityDocument()
+                ?: return error(404, "PAIR_SESSION_CLOSED", "no pairing session is open")
+            return json(200, document)
+        }
+        if (request.method != "POST") return methodNotAllowed(request.method, "POST")
+        if (!isJson(request)) return unsupportedMediaType()
+        if (oversized(request)) return tooLarge()
+        val parsed = JsonParser.parseObjectOrNull(request.body)
+            ?: return badRequest("body must be a JSON object")
+        val answer = if (path == PAIR_HELLO) {
+            pairing.hello(parsed, client)
+        } else {
+            pairing.poll(parsed)
+        }
+        return json(answer.status, answer.payload)
+    }
 
     private fun pluginRoute(path: String, request: HttpRequest): SuperResponse {
         val parts = path.removePrefix("$PLUGINS/").split("/")
@@ -268,6 +320,15 @@ class SuperRouter(
         )
     }
 
+    private fun hasScope(principal: SuperAuth.Principal, scope: PeerScope): Boolean =
+        when (principal) {
+            is SuperAuth.Principal.Operator -> true
+            is SuperAuth.Principal.Peer -> principal.scopes.contains(scope)
+        }
+
+    private fun scopeRequired(): SuperResponse.Json =
+        error(403, "SCOPE_REQUIRED", "this credential does not allow that")
+
     private fun badRequest(message: String): SuperResponse.Json =
         error(400, "BAD_REQUEST", message)
 
@@ -300,8 +361,12 @@ class SuperRouter(
         const val LOGIN: String = "/v1/auth/login"
         const val LOGOUT: String = "/v1/auth/logout"
         const val STATUS: String = "/v1/status"
+        const val CONFIG: String = "/v1/config"
         const val PLUGINS: String = "/v1/plugins"
         const val EVENTS: String = "/v1/events"
+        const val PAIR_IDENTITY: String = "/v1/pair/identity"
+        const val PAIR_HELLO: String = "/v1/pair/hello"
+        const val PAIR_POLL: String = "/v1/pair/poll"
 
         private const val HEARTBEAT_MS: Long = 15_000
         private const val MAX_STREAM_MS: Long = 30L * 60 * 1000

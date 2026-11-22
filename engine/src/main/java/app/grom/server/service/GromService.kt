@@ -242,6 +242,82 @@ class GromService : Service() {
             requireSameSigner()
             return runtime.notifyTestJson()
         }
+
+        // ------------------------------------------ API 6 (D70-D75, fleet)
+
+        override fun nodeIdentityJson(): String {
+            requireSameSigner()
+            return try {
+                runtime.nodeIdentityJson()
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
+        override fun nodeResetIdentityJson(confirmation: String?): String {
+            requireSameSigner()
+            return try {
+                runtime.nodeResetIdentityJson(confirmation.orEmpty())
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
+        override fun peersJson(): String {
+            requireSameSigner()
+            return runtime.peersJson()
+        }
+
+        override fun peerPairStartJson(): String {
+            requireSameSigner()
+            return try {
+                runtime.peerPairStartJson()
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
+        override fun peerPairPendingJson(): String {
+            requireSameSigner()
+            return runtime.peerPairPendingJson()
+        }
+
+        override fun peerPairCompleteJson(decisionJson: String?): String {
+            requireSameSigner()
+            return try {
+                runtime.peerPairCompleteJson(decisionJson.orEmpty())
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
+        override fun peerJoinJson(requestJson: String?): String {
+            requireSameSigner()
+            return try {
+                runtime.peerJoinJson(requestJson.orEmpty())
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
+        override fun peerConfirmJson(confirmJson: String?): String {
+            requireSameSigner()
+            return try {
+                runtime.peerConfirmJson(confirmJson.orEmpty())
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
+
+        override fun peerRemove(nodeId: String?) {
+            requireSameSigner()
+            guard { runtime.peerRemove(nodeId.orEmpty()) }
+        }
+
+        override fun peerRefreshJson(): String {
+            requireSameSigner()
+            return runtime.peerRefreshJson()
+        }
     }
 
     /**

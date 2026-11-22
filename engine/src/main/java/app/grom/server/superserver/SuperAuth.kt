@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package app.grom.server.superserver
 
+import app.grom.server.cluster.PeerScope
 import app.grom.server.core.Token
 import app.grom.server.superserver.auth.LoginLimiter
 import app.grom.server.superserver.auth.PasswordHash
@@ -28,11 +29,31 @@ class SuperAuth(
     private val sessions: SessionStore,
     private val requestLimiter: RateLimiter,
     private val loginLimiter: LoginLimiter,
-    private val signer: RequestSigner
+    private val signer: RequestSigner,
+    /**
+     * Maps a verified key id to what that key is allowed to do (D73). The
+     * default keeps the previous behaviour exactly: every registered key is an
+     * operator. A paired device is a [Principal.Peer] with explicit scopes.
+     */
+    private val principalOf: (String) -> Principal = { Principal.Operator }
 ) {
 
+    /**
+     * Who is calling. The session token and the operator's own keys are
+     * [Principal.Operator]; a paired device gets only the scopes the operator
+     * granted it during pairing.
+     */
+    sealed interface Principal {
+        data object Operator : Principal
+
+        data class Peer(val nodeId: String, val scopes: Set<PeerScope>) : Principal
+    }
+
     sealed class Outcome {
-        data class Authenticated(val actor: String) : Outcome()
+        data class Authenticated(
+            val actor: String,
+            val principal: Principal = Principal.Operator
+        ) : Outcome()
 
         data class Rejected(
             val status: Int,
@@ -126,13 +147,15 @@ class SuperAuth(
     ): Outcome {
         val bearer = Token.fromHeaders(header("authorization"), header("x-grom-token"))
         if (config.auth != AuthMode.KEY && bearer != null && sessions.validate(bearer)) {
-            return Outcome.Authenticated("session")
+            return Outcome.Authenticated("session", Principal.Operator)
         }
 
         if (config.auth != AuthMode.PASSWORD) {
             when (signer.verify(method, path, body, header)) {
-                is RequestSigner.Result.Ok ->
-                    return Outcome.Authenticated("key:${header("x-grom-key") ?: "unknown"}")
+                is RequestSigner.Result.Ok -> {
+                    val keyId = header("x-grom-key")?.trim().orEmpty()
+                    return Outcome.Authenticated("key:$keyId", principalOf(keyId))
+                }
                 is RequestSigner.Result.Rejected -> Unit
             }
         }

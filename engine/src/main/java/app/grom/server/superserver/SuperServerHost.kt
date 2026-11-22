@@ -2,6 +2,7 @@
 package app.grom.server.superserver
 
 import android.content.Context
+import app.grom.server.cluster.PairingPort
 import app.grom.server.core.BindResolution
 import app.grom.server.core.SuperBindPolicy
 import app.grom.server.http.HttpResponse
@@ -46,7 +47,17 @@ class SuperServerHost(
      * The operator-notification state (D65-D67). Sanitised by the notifier:
      * enabled, configured and the measured last delivery only.
      */
-    private val notifications: () -> Map<String, Any?> = { emptyMap() }
+    private val notifications: () -> Map<String, Any?> = { emptyMap() },
+    /** This device's fleet identity, never a peer list or an address (D59). */
+    private val fleet: () -> Map<String, Any?> = { emptyMap() },
+    /** Pairing routes; live only while the operator has opened a session (D71). */
+    private val pairing: PairingPort = PairingPort.DISABLED,
+    /** Maps a verified key id to an operator or a scoped peer (D73). */
+    private val principalOf: (String) -> SuperAuth.Principal = { SuperAuth.Principal.Operator },
+    /** Paired-device public keys, read live so a pairing needs no restart (D54). */
+    private val peerKeys: () -> Map<String, ByteArray> = { emptyMap() },
+    /** The sanitised hand-off document served at `GET /v1/config` (D53). */
+    private val configExport: () -> String = { "{}" }
 ) {
 
     private val lock = Any()
@@ -176,7 +187,8 @@ class SuperServerHost(
             "referral" to ReferralStore.summary(appContext),
             "projects" to projects(),
             "bridge" to bridge(),
-            "notifications" to notifications()
+            "notifications" to notifications(),
+            "fleet" to fleet()
         ) + SuperStatusDocument.build(config, lightningStatus)
     }
 
@@ -238,7 +250,8 @@ class SuperServerHost(
                     ) + mapOf(
                         "projects" to projects(),
                         "bridge" to bridge(),
-                        "notifications" to notifications()
+                        "notifications" to notifications(),
+                        "fleet" to fleet()
                     )
                 },
                 LightningPlugin(backend, loaded.lightning.kind.wireName, backendError)
@@ -246,14 +259,17 @@ class SuperServerHost(
         )
 
         val sessions = SessionStore(ttlMs = loaded.sessionTtlMs)
-        val signer = RequestSigner(keyLookup = { id -> keys[id] })
+        // Peers are read at every verification, so pairing or revoking needs no
+        // listener restart (D54); operator keys keep precedence.
+        val signer = RequestSigner(keyLookup = { id -> keys[id] ?: peerKeys()[id] })
         val auth = SuperAuth(
             config = loaded,
             passwords = passwords,
             sessions = sessions,
             requestLimiter = RateLimiter(),
             loginLimiter = LoginLimiter(),
-            signer = signer
+            signer = signer,
+            principalOf = principalOf
         )
 
         val bus = EventBus()
@@ -268,6 +284,8 @@ class SuperServerHost(
                 val started = startedAtMs
                 if (started == 0L) 0L else System.currentTimeMillis() - started
             },
+            pairing = pairing,
+            configExport = configExport,
             serverStatus = {
                 mapOf(
                     "address" to (server?.address ?: "not bound"),

@@ -14,12 +14,14 @@ package app.grom.sdk.ipc;
  * agent exec, and the operator's SSH bridge (D58). API 4 adds project-scoped
  * key/value access (D61), so an embedded project can only reach its own keys.
  * API 5 adds the operator's notification settings and a test send (D65).
+ * API 6 adds this device's fleet identity, mutual pairing and the paired-device
+ * roster (D70-D75).
  * Every new method goes through the same per-transaction signature gate as the
  * older ones.
  */
 interface IGromServer {
 
-    /** API version; API 3 is the embeddable surface. */
+    /** API version; API 6 adds device identity, pairing and the fleet roster. */
     int apiVersion();
 
     /** Same JSON document as GET /grom/v1/health. */
@@ -125,4 +127,49 @@ interface IGromServer {
      * when the provider answered `{"ok":true}`.
      */
     String notifyTestJson();
+
+    // --------------------------------------------------------- API 6 (D70-D75)
+
+    /**
+     * `{nodeId, publicKey, label, fingerprint, createdAtMs}`. The private seed
+     * is never returned by any method and never reaches a document (D72).
+     */
+    String nodeIdentityJson();
+
+    /**
+     * Replaces the identity and forgets every pairing; [confirmation] must be
+     * the word `RESET`, because every peer will see a stranger (D72).
+     */
+    String nodeResetIdentityJson(String confirmation);
+
+    /**
+     * The paired devices with their measured state. This is the only projection
+     * that carries an address; status and export never do (D59).
+     */
+    String peersJson();
+
+    /** Opens a short-lived pairing session and returns the code to show. */
+    String peerPairStartJson();
+
+    /** The device waiting for this operator's decision, if any. */
+    String peerPairPendingJson();
+
+    /** Approves or rejects the waiting device: `{accept, scopes}` (D73). */
+    String peerPairCompleteJson(String decisionJson);
+
+    /**
+     * Joins a device that is showing a code; blocks until the other operator
+     * decides (or the request times out). The result is an *unverified* offer
+     * that must be confirmed on this screen (D71).
+     */
+    String peerJoinJson(String requestJson);
+
+    /** Confirms the verified fingerprint and stores the peer. */
+    String peerConfirmJson(String confirmJson);
+
+    /** Removes a paired device; its key stops verifying on the next request. */
+    void peerRemove(String nodeId);
+
+    /** Probes the paired devices now. Nothing is scheduled in the background. */
+    String peerRefreshJson();
 }

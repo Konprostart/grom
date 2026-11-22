@@ -124,8 +124,9 @@ class GromClient(
          * API 2 added [IGromServer.reloadSuperServer] (D39); API 3 adds the
          * embeddable surface: projects, config export, agent exec and the SSH
          * bridge (D55, D58); API 4 adds the project-scoped key/value path (D61);
-         * API 5 adds the operator's notification settings (D65).
+         * API 5 adds the operator's notification settings (D65); API 6 adds the
+         * device identity, mutual pairing and the fleet roster (D70-D75).
          */
-        const val API_VERSION: Int = 5
+        const val API_VERSION: Int = 6
     }
 }

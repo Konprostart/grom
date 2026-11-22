@@ -8,7 +8,14 @@ import app.grom.server.agent.AgentLauncher
 import app.grom.server.agent.AssetRuntime
 import app.grom.server.agent.NodeAgentProcess
 import app.grom.server.audit.AuditStore
+import app.grom.server.cluster.FleetService
+import app.grom.server.cluster.FleetStatus
+import app.grom.server.cluster.NodeIdentity
+import app.grom.server.cluster.NodeIdentityStore
+import app.grom.server.cluster.PeerStore
+import app.grom.server.cluster.PeerAddress
 import app.grom.server.core.AgentState
+import app.grom.server.core.BindMode
 import app.grom.server.core.BindResolution
 import app.grom.server.core.HealthGate
 import app.grom.server.core.Redactor
@@ -36,7 +43,9 @@ import app.grom.server.store.AndroidKeystoreSecretBox
 import app.grom.server.store.SecureStore
 import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
+import app.grom.server.superserver.AuthMode
 import app.grom.server.superserver.ConfigExport
+import app.grom.server.superserver.SuperServerConfig
 import app.grom.server.superserver.SuperServerHost
 import java.io.File
 import java.util.concurrent.Executors
@@ -69,6 +78,23 @@ class ServerRuntime(
     private val projectRegistry = ProjectRegistry(File(rootDir, ProjectRegistry.FILE_NAME))
     private val secretBox = AndroidKeystoreSecretBox()
     private val sshStore = SshTargetStore(File(rootDir, SshTargetStore.FILE_NAME), secretBox)
+
+    /**
+     * This device's fleet identity and its paired peers (D70-D75). Both stores
+     * are small and local; the service owns pairing and the on-demand probes.
+     */
+    private val identityStore = NodeIdentityStore(
+        File(rootDir, NodeIdentityStore.FILE_NAME),
+        secretBox
+    )
+    private val peerStore = PeerStore(File(rootDir, PeerStore.FILE_NAME))
+    private val fleet = FleetService(
+        identityStore = identityStore,
+        store = peerStore,
+        defaultLabel = { deviceLabel() },
+        localPort = { port },
+        audit = { action, detail -> safeAudit(action, detail) }
+    )
 
     /**
      * The reverse SSH bridge (D58). The manager is owned by the runtime, so the
@@ -141,7 +167,12 @@ class ServerRuntime(
             logger = { line -> log(line) },
             projects = { projectRegistry.summary() },
             bridge = { sshTunnels.statusForServer() },
-            notifications = { notifier.publicStatus() }
+            notifications = { notifier.publicStatus() },
+            fleet = { fleet.statusDocument() },
+            pairing = fleet.pairing,
+            principalOf = { keyId -> fleet.principalOf(keyId) },
+            peerKeys = { fleet.peerKeys() },
+            configExport = { configExportJson() }
         )
     }
 
@@ -201,6 +232,7 @@ class ServerRuntime(
             safeAudit("server.stop", "")
             running = false
             superServer.stop()
+            fleet.onDataPlaneStopped()
             sshTunnels.stopAll()
             httpServer?.stop()
             httpServer = null
@@ -228,7 +260,7 @@ class ServerRuntime(
 
     // ------------------------------------------------------------------ GromApi
 
-    override fun apiVersion(): Int = 3
+    override fun apiVersion(): Int = 6
 
     override fun authorize(candidate: String?): Boolean =
         candidate != null && Token.matches(token, candidate)
@@ -479,7 +511,8 @@ class ServerRuntime(
             lightning = lightning,
             projects = projectRegistry.summary(),
             bridge = sshTunnels.statusForServer(),
-            notifications = notifier.publicStatus()
+            notifications = notifier.publicStatus(),
+            fleet = FleetStatus.document(fleet.identityOrNull())
         )
     }
 
@@ -657,6 +690,71 @@ class ServerRuntime(
         }
         return Json.encode(result)
     }
+
+    // ------------------------------------------------------- Fleet (API 6)
+
+    fun nodeIdentityJson(): String = fleet.identityJson()
+
+    fun nodeResetIdentityJson(confirmation: String): String = fleet.resetIdentity(confirmation)
+
+    fun peersJson(): String = fleet.peersJson()
+
+    /**
+     * Opens a pairing session. Pairing is reachable from another device only
+     * while the public data plane is running on a non-loopback bind; refusing
+     * early is better than handing out a code that nothing can reach.
+     */
+    fun peerPairStartJson(): String {
+        requirePairingDataPlane()
+        return fleet.startPairingJson()
+    }
+
+    private fun requirePairingDataPlane() {
+        if (superServer.status()["running"] != true) {
+            throw ApiException(
+                409,
+                "PAIR_DATA_PLANE_STOPPED",
+                "turn on Public access before pairing with another device"
+            )
+        }
+        if (superServer.currentConfig().bind == BindMode.LOOPBACK) {
+            throw ApiException(
+                409,
+                "PAIR_LOOPBACK_ONLY",
+                "this device is reachable on loopback only; choose the LAN bind to pair"
+            )
+        }
+        // Peers authenticate by Ed25519 key, so a password-only data plane
+        // would hand out a pairing that can never be used. Refusing here is
+        // better than a lamp that is red for a reason the operator cannot see.
+        if (superServer.currentConfig().auth == AuthMode.PASSWORD) {
+            throw ApiException(
+                409,
+                "PAIR_KEY_AUTH_REQUIRED",
+                "paired devices sign their requests; choose Key or Both for the public API"
+            )
+        }
+    }
+
+    fun peerPairingStatusJson(): String = fleet.pairingStatusJson()
+
+    fun peerPairPendingJson(): String = fleet.pendingJson()
+
+    fun peerPairCompleteJson(body: String): String = fleet.completePairingJson(body)
+
+    /** Blocking network work; callers must not run this on the main thread. */
+    fun peerJoinJson(body: String): String {
+        requirePairingDataPlane()
+        return fleet.joinJson(body)
+    }
+
+    fun peerConfirmJson(body: String): String = fleet.confirmJson(body)
+
+    fun peerRemove(nodeId: String) {
+        fleet.removePeer(nodeId)
+    }
+
+    fun peerRefreshJson(): String = fleet.refreshJson()
 
     // --------------------------------------------------- Lightning probe (D52)
 
@@ -896,6 +994,10 @@ class ServerRuntime(
 
     companion object {
         private const val TICK_MS = 1_000L
+
+        /** A readable default label for this device's identity (D70). */
+        private fun deviceLabel(): String =
+            NodeIdentity.normalizeLabel(android.os.Build.MODEL?.replace('_', ' '))
 
         /** The version of the APK that hosts this code. */
         fun hostVersion(context: Context): String = try {
