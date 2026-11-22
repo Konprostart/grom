@@ -3,10 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D78 and S1-R002…S1-R044,
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D79 and S1-R002…S1-R044,
 # S5-R001…S5-R049.
 #
-# The gate is intentionally a fixed count: "41/41" is the number of passes.
+# The gate is intentionally a fixed count: "42/42" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -234,6 +234,14 @@ check "an inbound-only grant is never dialled" \
 #     or a key in that projection would let the roster file leak the topology.
 check "the hub roster carries no address or key" \
   bash -c "grep -q 'ROSTER_FIELDS' tools/hub/GromHub.java && ! grep -qE 'ROSTER_FIELDS[[:space:]]*=[[:space:]]*List\.of\([^)]*(url|address|port|publicKey|key)' tools/hub/GromHub.java && grep -q '\"label\", \"nodeId\", \"state\", \"lastSeenMs\", \"lastError\"' tools/hub/GromHub.java"
+
+# 42. the provisioning tool can only read a phone, install the APK the operator
+#     names, and ask for a battery exemption (D79). It talks to adb through an
+#     argument list, never a shell string, and it contains no command that could
+#     destroy device state — the words themselves are banned from that file, so
+#     the guard inside it can only ever describe what the tool actually ran.
+check "the provisioning tool destroys nothing and never uses a shell" \
+  bash -c "grep -q 'ProcessBuilder' tools/provision/GromProvision.java && ! grep -qE 'Runtime\.getRuntime|\"sh\", *\"-c\"' tools/provision/GromProvision.java && ! grep -qE 'uninstall|pm clear|reboot|kill|force-stop|format-userdata' tools/provision/GromProvision.java && grep -q 'INSTALL_TIMEOUT_MS' tools/provision/GromProvision.java"
 
 echo
 TOTAL=$((PASS + FAIL))

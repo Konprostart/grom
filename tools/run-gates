@@ -45,7 +45,7 @@ step "JVM tests (engine and both flavours)" gradle_run \
   :app:testServer29DebugUnitTest \
   :app:testPeripheral26DebugUnitTest
 
-step "static policy (41 checks)" ./tools/test-policy
+step "static policy (42 checks)" ./tools/test-policy
 step "third-party ledger" ./tools/check-third-party
 step "IPC signing (C-008)" ./tools/verify-ipc-signing
 step "agent secrets (stdin, not argv)" ./tools/test-agent
@@ -53,6 +53,7 @@ step "agent runtime protocol (node)" ./tools/test-agent-runtime
 step "download page (static, no third parties)" ./tools/check-site
 step "fleet view self-test" ./tools/test-fleet
 step "hub roster self-test" ./tools/test-hub
+step "provisioning self-test" ./tools/test-provision
 step "Android lint (both flavours)" gradle_run :app:lintServer29Debug :app:lintPeripheral26Debug
 
 echo

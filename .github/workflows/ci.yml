@@ -85,6 +85,9 @@ jobs:
       - name: Hub roster self-test
         run: ./tools/test-hub
 
+      - name: Provisioning self-test
+        run: ./tools/test-provision
+
       - name: Lint (both flavours)
         run: |
           gradle --no-daemon --stacktrace \
