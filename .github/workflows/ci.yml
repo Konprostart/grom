@@ -79,6 +79,9 @@ jobs:
           tools/test-policy
           tools/verify-ipc-signing
 
+      - name: Fleet view self-test
+        run: ./tools/test-fleet
+
       - name: Lint (both flavours)
         run: |
           gradle --no-daemon --stacktrace \
