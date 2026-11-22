@@ -685,6 +685,11 @@ paired with text, and the mapping is a pure function in `DashboardModel`, tested
 on the JVM. Section open/closed state is presentation-only, stored in
 `GromPrefs`.
 
+> **Amended by D68 and D69:** the collapsible cards and the stored open/closed
+> state are gone. Sections now open from a header menu, so there is nothing to
+> remember; `GromPrefs.sectionOpen`/`setSectionOpen` were removed with the last
+> two cards. The lamp rule above is unchanged and is what still matters here.
+
 *Why:* a dashboard that turns green because a flag is set is worse than no
 dashboard. The projection being pure means the rule has tests instead of
 screenshots.
@@ -834,9 +839,9 @@ language: what Grom does, why most people need no rented server, and when an
 external SSH server helps. The content lives in `HelpModel` + `strings.xml`, is
 fixed at three blocks, and reports no state.
 
-> **Amended by D68:** the section is now open on first run, sits immediately
-> after the invite card, and has seven blocks. The static-content rule and the
-> test below are unchanged.
+> **Amended by D68:** the section has seven blocks. **Amended by D69:** it is
+> no longer a card on the page — it opens from the header menu as the last
+> entry. The static-content rule and the test below are unchanged.
 
 The test asserts the block count and order, that every string exists, and that
 the text contains no URL, no currency, no `balance`, no `payout`, and no uptime
@@ -988,4 +993,39 @@ removed — only moved behind one tap — and no lamp, secret or gate changes.
 *Enforced by:* `MenuModelTest` (order, uniqueness, role split, strings exist),
 `HelpModelTest` (block count and order, no address/price/uptime claim),
 `tools/run-gates` (lint stays at 0/0, all three JVM suites).
+
+> **Amended by D69:** the invite card and the explanation also moved into the
+> menu. The page is now the header, the hero and "Now serving" — nothing else.
+
+## D69 — the page holds nothing but the server; the invite card and the explanation are menu entries
+**ACCEPTED.** The invite card and the "How Grom works" explanation are no longer
+cards on the page. They are the last two entries of the header menu, in that
+order: `MenuModel.KEY_INVITE` then `MenuModel.KEY_HELP`. The page is the header
+(wordmark, Menu, theme switch), the status hero with Start/Stop, the "Now
+serving" card and the footer version line.
+
+`peripheral26` gets update, invite and help — the invite card and the text exist
+in that build, so listing them is not an empty promise.
+
+The collapsible card helper (`sectionCard`/`toggleSection`), the chevron header
+(`Views.sectionHeader`) and their presentation preference
+(`GromPrefs.sectionOpen`/`setSectionOpen`) are deleted rather than left unused:
+every section is now a menu dialog, so "is this card open" has no meaning.
+
+*Why:* the previous increment already moved the configuration into the menu, but
+left the invite card and a scroll-length explanation underneath the dashboard.
+An operator opening the app still had to scroll past two informational cards to
+confirm that the footer — and therefore the screen — had ended. The instruction
+was explicit: the main page shows only what matters, and the explanation belongs
+in the menu like everything else.
+
+*Cost, stated plainly:* the import from D62's "open on first run" is gone.
+Nothing is lost — the explanation is one tap away and is the last entry of the
+menu — but a first-time user no longer sees it without opening the menu. The
+section cards were also the only place that remembered UI state; that state is
+now simply absent.
+
+*Enforced by:* `MenuModelTest` (order ends with `invite`, `help`; both roles;
+titles and subtitles exist), `HelpModelTest` (unchanged content rules),
+`tools/run-gates` (9/9, lint 0/0).
 

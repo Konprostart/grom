@@ -204,16 +204,17 @@ runtime requirement and the trust-boundary cost.
 
 ## How Grom works
 
-The last card of the app, immediately after the invite code, explains in plain
-language what Grom does, why most people need no rented server, when an external
-SSH server helps, what the Nostr/Lightning and local-project rows mean, how the
-Telegram alerts work, and — last — what Grom cannot do when the phone is off or
-offline. It is static, is open on first run, and reports no state, so it cannot
-claim anything is running.
+The page holds only the server: the status headline with **Start/Stop** and the
+**Now serving** card with its measured lamps. Everything else — external
+servers, Nostr & Lightning, local projects, alerts, public access, supervision,
+updates, the invite card and this explanation — opens from the **Menu** button
+in the top right, next to the theme switch, in that order.
 
-Everything else (external servers, Nostr & Lightning, local projects, alerts,
-public access, supervision, updates) lives in the **Menu** button in the top
-right, next to the theme switch.
+"How Grom works" is the last entry in that menu. It explains in plain language
+what Grom does, why most people need no rented server, when an external SSH
+server helps, what the Nostr/Lightning and local-project rows mean, how the
+Telegram alerts work, and — last — what Grom cannot do when the phone is off or
+offline. It is static, reports no state, and cannot claim anything is running.
 
 ## Telegram alerts
 

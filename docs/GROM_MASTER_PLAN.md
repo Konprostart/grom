@@ -51,7 +51,7 @@ A claim without a tag is a statement about the plan, not about the product.
 | Reference config (`npub`, `relays`, `remoteBridge`) | `[SHIPPED]` — D52–D54, S5-R032–R034; validated, reference-only, in authenticated `/v1/status` and the sanitized Copy-config export |
 | Embeddable engine (`:engine`) + API 4 | `[SHIPPED]` at JVM-test level — D55/D61, `GromEmbed`, `GromProject`, `ProjectNamespace`, `ProjectRegistry`; manifests proven by policy checks 25/26, namespace by 30 |
 | Dashboard lamps and collapsible sections | `[SHIPPED]` at JVM-test level — D56, `DashboardModelTest` |
-| Quiet dashboard + header menu, invite then explanation at the bottom | `[SHIPPED]` — D68, `MenuModelTest` + `HelpModelTest` |
+| Quiet dashboard + header menu, invite then explanation in the menu | `[SHIPPED]` — D68/D69, `MenuModelTest` + `HelpModelTest` |
 | Project registry with heartbeat-derived liveness | `[SHIPPED]` at JVM-test level — D57, `ProjectRegistryTest` |
 | Reverse SSH bridge (TOFU, `tcpip-forward` only) | `[SHIPPED]` against a real in-process SSH server — D58, `SshTunnelManagerTest`; **not** on hardware |
 | Bridge/project status, no operator addresses off-device | `[SHIPPED]` — D59, `ConfigExportTest` sentinel, `SshTunnelManagerTest` |
