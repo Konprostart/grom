@@ -207,6 +207,31 @@ object SshTargetRules {
     }
 
     /**
+     * The remote port forward is one address per server. Two saved targets on
+     * the same host with the same forward port would collide at connect time,
+     * where the failure would look like a network problem instead of a typo.
+     * This is checked across the saved list, which a single draft cannot see
+     * (D78).
+     */
+    fun forwardPortConflict(
+        records: List<SshTarget>,
+        host: String,
+        remoteForwardPort: Int,
+        id: String?
+    ): SshProblem? {
+        val clash = records.firstOrNull {
+            it.id != id &&
+                it.host.equals(host.trim(), ignoreCase = true) &&
+                it.remoteForwardPort == remoteForwardPort
+        } ?: return null
+        return SshProblem(
+            "BAD_FORWARD_PORT_CONFLICT",
+            "${clash.label} already uses forward port $remoteForwardPort on that host; " +
+                "give this server its own port"
+        )
+    }
+
+    /**
      * Serialised targets can be edited across releases, so stored values are
      * re-validated on load rather than trusted because they were once written.
      */

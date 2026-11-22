@@ -254,10 +254,27 @@ class SshTunnelManager(
             established.auth().verify(AUTH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
 
             // The only thing this session is allowed to do (D58).
-            established.startRemotePortForwarding(
-                SshdSocketAddress("127.0.0.1", target.remoteForwardPort),
-                SshdSocketAddress(local.first, local.second)
-            )
+            //
+            // This is a separate try because a server refusing the forward is a
+            // different problem from a network failure: the port is already in
+            // use, the server forbids forwards, or the address is not allowed.
+            // Reporting `SSH_FAILED` there would send the operator to look at
+            // the network (D78).
+            try {
+                established.startRemotePortForwarding(
+                    SshdSocketAddress("127.0.0.1", target.remoteForwardPort),
+                    SshdSocketAddress(local.first, local.second)
+                )
+            } catch (refused: Throwable) {
+                runCatching { established.close(true) }
+                runCatching { client.stop() }
+                return fail(
+                    id = target.id,
+                    code = "SSH_FORWARD_REFUSED",
+                    message = "the server refused the remote forward port " +
+                        "${target.remoteForwardPort} (is it already in use?)"
+                )
+            }
 
             val fingerprint = observed.get() ?: "SHA256:unavailable"
             val learned = target.hostKeySha256 == null

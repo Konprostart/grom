@@ -285,6 +285,43 @@ class SshTunnelManagerTest {
         manager.stopAll()
         assertEquals(0, manager.activeCount())
     }
+
+    /**
+     * A server that refuses the remote port (already bound, or forwarding
+     * forbidden) is a distinct, actionable failure (D78). Mapping it to
+     * `SSH_FAILED` would send the operator hunting for a network problem.
+     */
+    @Test(timeout = 120_000)
+    fun `a refused remote port is reported distinctly`() {
+        val occupied = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        try {
+            val store = newStore()
+            val saved = store.upsert(
+                SshTargetDraft(
+                    label = "busy port vps",
+                    host = "127.0.0.1",
+                    port = sshPort,
+                    username = "grom",
+                    auth = SshAuth.PASSWORD,
+                    password = "s3cret-pass",
+                    remoteForwardPort = occupied.localPort
+                )
+            )
+            val manager = manager(store)
+            val probe = manager.connect(saved.id, null) as SshTunnelManager.Result.HostKeyUnverified
+            val result = manager.connect(saved.id, probe.fingerprint)
+
+            assertTrue("expected a refusal, got $result", result is SshTunnelManager.Result.Failed)
+            assertEquals(
+                "SSH_FORWARD_REFUSED",
+                (result as SshTunnelManager.Result.Failed).code
+            )
+            assertEquals(SshTunnelManager.State.FAILED, manager.state(saved.id))
+            assertFalse(manager.isActive(saved.id))
+        } finally {
+            occupied.close()
+        }
+    }
 }
 
 class SshForwardingPolicyTest {

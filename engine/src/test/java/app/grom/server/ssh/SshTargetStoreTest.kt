@@ -108,6 +108,28 @@ class SshTargetStoreTest {
     }
 
     @Test
+    fun `two servers on one host may not share a forward port`() {
+        val store = store()
+        store.upsert(passwordDraft())
+
+        // The same VPS and the same remote port would collide at connect time.
+        val clash = runCatching {
+            store.upsert(passwordDraft().copy(label = "Second tunnel"))
+        }.exceptionOrNull()
+        assertTrue(clash is ApiException && clash.code == "BAD_FORWARD_PORT_CONFLICT")
+
+        // A different port is fine, and so is the same port on another host.
+        store.upsert(passwordDraft().copy(label = "Second tunnel", remoteForwardPort = 41002))
+        store.upsert(passwordDraft().copy(label = "Other VPS", host = "198.51.100.7"))
+        assertEquals(3, store.list().size)
+
+        // Editing a server does not conflict with itself.
+        val first = store.list().first { it.label == "Mostro VPS" }
+        store.upsert(passwordDraft(id = first.id).copy(port = 2222))
+        assertEquals(3, store.list().size)
+    }
+
+    @Test
     fun `hostile hosts and labels are refused before any socket exists`() {
         for (host in listOf("https://evil", "user@host", "host/path", "ho st", "-leading")) {
             val failure = runCatching { store().upsert(passwordDraft().copy(host = host)) }

@@ -132,6 +132,16 @@ class SshTargetStore(
             enabled = draft.enabled
         )
 
+        // One remote forward port per host (D78): two tunnels asking for the
+        // same port on the same VPS collide, and the second failure is a
+        // confusing network error unless it is refused here.
+        SshTargetRules.forwardPortConflict(
+            records = records,
+            host = saved.host,
+            remoteForwardPort = saved.remoteForwardPort,
+            id = saved.id
+        )?.let { throw ApiException(409, it.code, it.message) }
+
         records.removeAll { it.id == id }
         records.add(saved)
         save(records)
