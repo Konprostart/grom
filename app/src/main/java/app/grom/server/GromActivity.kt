@@ -53,6 +53,7 @@ import app.grom.server.superserver.nostr.RemoteBridgeHint
 import app.grom.server.superserver.plugins.lightning.ExternalNodeKind
 import app.grom.server.superserver.plugins.lightning.ExternalNodeRef
 import app.grom.server.ui.DashboardModel
+import app.grom.server.ui.FleetModel
 import app.grom.server.ui.GromTheme
 import app.grom.server.ui.HelpModel
 import app.grom.server.ui.Lamp
@@ -146,6 +147,18 @@ class GromActivity : Activity() {
 
     private lateinit var projectsList: LinearLayout
     private var lastProjectsSignature: String? = null
+
+    /** Fleet: this device's identity and the devices paired with it (D70-D75). */
+    private lateinit var fleetList: LinearLayout
+    private lateinit var fleetIdentityLabel: TextView
+    private lateinit var fleetIdentityDetail: TextView
+    private lateinit var fleetIdentityNote: TextView
+    private lateinit var fleetDetail: TextView
+    private var fleetIdentityDoc: Map<*, *>? = null
+    private var fleetPeers: List<Map<String, Any?>> = emptyList()
+    private var fleetLoaded = false
+    private var fleetRefreshing = false
+    private var lastFleetSignature: String? = null
 
     /** Telegram alerts (D65). The token is never displayed, only "set". */
     private lateinit var alertsEnableRow: Pair<LinearLayout, TextView>
@@ -417,6 +430,7 @@ class GromActivity : Activity() {
         if (!BuildConfig.GROMSERVER) return
         panel(MenuModel.KEY_RUNTIME) { buildRuntimeSection(it) }
         panel(MenuModel.KEY_SSH) { buildSshSection(it) }
+        panel(MenuModel.KEY_FLEET) { buildFleetSection(it) }
         panel(MenuModel.KEY_NOSTR) { buildNostrSection(it) }
         panel(MenuModel.KEY_PROJECTS) { buildProjectsSection(it) }
         panel(MenuModel.KEY_ALERTS) { buildAlertsSection(it) }
@@ -570,6 +584,8 @@ class GromActivity : Activity() {
         // Paint the freshly opened section from the last status immediately
         // instead of waiting up to a second for the refresher tick.
         render()
+        // Probes run when the operator asks, never in the background (D74).
+        if (key == MenuModel.KEY_FLEET && !fleetLoaded) refreshFleet()
     }
 
     // ---------------------------------------------------------- section bodies
@@ -669,6 +685,71 @@ class GromActivity : Activity() {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
             }
+        )
+    }
+
+
+    /**
+     * Devices (D70-D75).
+     *
+     * The identity block is what the operator compares on two screens; the peer
+     * rows carry measured lamps only. Nothing here polls: the section loads once
+     * when opened (and on Refresh), because a phone that pretends to watch other
+     * phones around the clock would be the exact lie the lamps avoid.
+     */
+    private fun buildFleetSection(body: LinearLayout) {
+        if (!BuildConfig.GROMSERVER) {
+            body.addView(text(getString(R.string.fleet_unavailable), 12f, palette.muted))
+            return
+        }
+        body.addView(text(getString(R.string.fleet_hint), 12f, palette.muted))
+        body.addView(gap(12))
+
+        body.addView(label(getString(R.string.fleet_this_device), palette))
+        fleetIdentityLabel = text("", 15f, palette.onSurface, Typeface.BOLD)
+        fleetIdentityDetail = text("", 11f, palette.muted)
+        fleetIdentityNote = text("", 11f, palette.negative)
+        body.addView(gap(4))
+        body.addView(fleetIdentityLabel)
+        body.addView(gap(2))
+        body.addView(fleetIdentityDetail)
+        body.addView(gap(2))
+        body.addView(fleetIdentityNote)
+        body.addView(gap(8))
+        body.addView(
+            fleetButton(R.string.fleet_copy_identity) { copyFleetIdentity() }
+        )
+        body.addView(gap(6))
+        body.addView(
+            fleetButton(R.string.fleet_reset_identity) { confirmResetIdentity() }
+        )
+
+        body.addView(divider(palette))
+        body.addView(label(getString(R.string.fleet_paired_devices), palette))
+        fleetList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(fleetList)
+        body.addView(gap(12))
+        body.addView(fleetButton(R.string.fleet_pair) { showPairPicker() })
+        body.addView(gap(6))
+        body.addView(fleetButton(R.string.fleet_refresh) { refreshFleet() })
+        fleetDetail = text("", 11f, palette.muted)
+        body.addView(gap(6))
+        body.addView(fleetDetail)
+        body.addView(gap(12))
+        body.addView(text(getString(R.string.fleet_pair_warning), 11f, palette.muted))
+    }
+
+    private fun fleetButton(res: Int, onClick: () -> Unit): TextView = pill(
+        value = getString(res),
+        textColor = palette.onSurface,
+        fill = palette.background,
+        rippleColor = palette.ripple,
+        stroke = palette.border,
+        onClick = onClick
+    ).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
         )
     }
 
@@ -1652,6 +1733,417 @@ class GromActivity : Activity() {
         }
     }
 
+
+    /**
+     * Paints the fleet from the last measurement. It never calls the network:
+     * [refreshFleet] does that on a worker thread and hands the result here.
+     */
+    private fun renderFleet() {
+        if (!BuildConfig.GROMSERVER || !::fleetList.isInitialized) return
+
+        val fromStatus = status?.get("fleet") as? Map<*, *>
+        if (fleetIdentityDoc == null && fromStatus != null) fleetIdentityDoc = fromStatus
+
+        val signature = buildString {
+            append(fleetIdentityDoc?.get("nodeId"))
+            append('|').append(fleetPeers.size)
+            for (peer in fleetPeers) {
+                append('|').append(peer["nodeId"]).append(':').append(peer["state"])
+            }
+        }
+        if (signature == lastFleetSignature) return
+        lastFleetSignature = signature
+
+        val identity = fleetIdentityDoc
+        val nodeId = identity?.get("nodeId") as? String
+        val identityLabel = identity?.get("label") as? String
+        if (nodeId.isNullOrEmpty()) {
+            fleetIdentityLabel.text = getString(R.string.fleet_identity_missing)
+            fleetIdentityDetail.text = ""
+            fleetIdentityNote.text = if (fleetLoaded) {
+                getString(R.string.fleet_identity_error)
+            } else {
+                ""
+            }
+        } else {
+            fleetIdentityLabel.text = identityLabel ?: getString(R.string.ui_wordmark)
+            fleetIdentityDetail.text = getString(
+                R.string.fleet_identity_detail,
+                nodeId,
+                FleetModel.fingerprint(nodeId)
+            )
+            fleetIdentityNote.text = ""
+        }
+
+        fleetList.removeAllViews()
+        if (fleetPeers.isEmpty()) {
+            fleetList.addView(text(getString(R.string.fleet_none), 12f, palette.muted))
+        } else {
+            for (peer in fleetPeers) {
+                fleetList.addView(fleetRow(peer))
+                fleetList.addView(divider(palette))
+            }
+        }
+    }
+
+    private fun fleetRow(peer: Map<String, Any?>): View {
+        val dot = lampView(FleetModel.lampOf(peer), palette)
+        val state = peer["state"] as? String
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        column.addView(
+            text(
+                (peer["label"] as? String).orEmpty(),
+                15f,
+                palette.onSurface,
+                Typeface.BOLD
+            )
+        )
+        column.addView(
+            text(
+                getString(R.string.fleet_address, (peer["address"] as? String).orEmpty()),
+                11f,
+                palette.muted
+            )
+        )
+        column.addView(
+            text(getString(FleetModel.stateRes(state)), 11f, stateColour(state ?: ""))
+        )
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showPeerDialog(peer) }
+            addView(dot)
+            addView(
+                column,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            addView(text("\u203A", 20f, palette.muted))
+        }
+    }
+
+    private fun fleetDoc(block: (IGromServer) -> String): Map<String, Any?> {
+        val server = client.server
+            ?: throw IllegalStateException(getString(R.string.toast_not_bound, getString(R.string.ui_fleet)))
+        return JsonParser.parseObjectOrNull(block(server))
+            ?: throw IllegalStateException("the engine returned no document")
+    }
+
+    /**
+     * Runs the probes now. The engine never schedules them, so this is the only
+     * place a peer lamp can change.
+     */
+    private fun refreshFleet() {
+        if (!connected) {
+            toast(getString(R.string.toast_not_bound, getString(R.string.ui_fleet)))
+            return
+        }
+        if (fleetRefreshing) return
+        fleetRefreshing = true
+        if (::fleetDetail.isInitialized) fleetDetail.text = getString(R.string.fleet_checking)
+        Thread {
+            val identity = runCatching { fleetDoc { it.nodeIdentityJson() } }.getOrNull()
+            val result = runCatching { fleetDoc { it.peerRefreshJson() } }.getOrNull()
+            val peers = extractPeers(result)
+            handler.post {
+                fleetRefreshing = false
+                if (identity != null) fleetIdentityDoc = identity
+                fleetPeers = peers
+                fleetLoaded = true
+                lastFleetSignature = null
+                render()
+                if (result != null && ::fleetDetail.isInitialized) {
+                    val checked = (result["refreshed"] as? Number)?.toInt() ?: 0
+                    val total = (result["total"] as? Number)?.toInt() ?: peers.size
+                    fleetDetail.text = getString(R.string.fleet_refreshed, checked, total)
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * The engine's pairing codes are stable; two of them mean the same thing to
+     * an operator (the public API is not reachable), so they get one sentence
+     * instead of a raw `GROM_E_` prefix.
+     */
+    private fun fleetFailure(failure: Throwable): String {
+        val message = failure.message.orEmpty()
+        return when {
+            message.contains("PAIR_DATA_PLANE_STOPPED") ||
+                message.contains("PAIR_LOOPBACK_ONLY") ->
+                getString(R.string.fleet_data_plane_off)
+            message.contains("PAIR_KEY_AUTH_REQUIRED") ->
+                getString(R.string.fleet_key_auth_required)
+            else -> message.ifEmpty { getString(R.string.fleet_pair) }
+        }
+    }
+
+    private fun extractPeers(document: Map<String, Any?>?): List<Map<String, Any?>> =
+        (document?.get("peers") as? List<*>)
+            ?.mapNotNull { it as? Map<*, *> }
+            ?.map { raw ->
+                raw.entries.filter { it.key is String }
+                    .associate { it.key as String to it.value }
+            }
+            ?: emptyList()
+
+    private fun copyFleetIdentity() {
+        val identity = fleetIdentityDoc ?: return
+        val nodeId = (identity["nodeId"] as? String).orEmpty()
+        if (nodeId.isEmpty()) return
+        copyText(
+            "Grom device\n${identity["label"]}\n$nodeId\n${FleetModel.fingerprint(nodeId)}",
+            R.string.fleet_identity_copied
+        )
+    }
+
+    private fun confirmResetIdentity() {
+        val input = EditText(this).apply {
+            hint = getString(R.string.fleet_identity_reset_hint)
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_identity_reset_title)
+            .setMessage(R.string.fleet_identity_reset_body)
+            .setView(input)
+            .setPositiveButton(R.string.fleet_identity_reset_action) { _, _ ->
+                val answer = input.text.toString().trim()
+                try {
+                    fleetDoc { it.nodeResetIdentityJson(answer) }
+                    fleetIdentityDoc = null
+                    fleetPeers = emptyList()
+                    fleetLoaded = false
+                    lastFleetSignature = null
+                    toast(getString(R.string.fleet_identity_reset_done))
+                    refreshNow()
+                } catch (failure: Exception) {
+                    toast(failure.message ?: getString(R.string.fleet_identity_reset_action))
+                }
+            }
+            .setNegativeButton(R.string.fleet_cancel, null)
+            .show()
+    }
+
+    private fun showPairPicker() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_pair_pick)
+            .setItems(
+                arrayOf(
+                    getString(R.string.fleet_pair_show),
+                    getString(R.string.fleet_pair_join)
+                )
+            ) { _, which ->
+                if (which == 0) showShowCodeDialog() else showJoinDialog()
+            }
+            .show()
+    }
+
+    private fun showShowCodeDialog() {
+        val started = try {
+            fleetDoc { it.peerPairStartJson() }
+        } catch (failure: Exception) {
+            toast(fleetFailure(failure))
+            return
+        }
+        val code = started["code"] as? String ?: return
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_code_title)
+            .setMessage(getString(R.string.fleet_code_body, code))
+            .setPositiveButton(R.string.fleet_code_check) { _, _ -> checkPendingPairing() }
+            .setNegativeButton(R.string.fleet_cancel, null)
+            .show()
+    }
+
+    private fun checkPendingPairing() {
+        val pending = try {
+            (fleetDoc { it.peerPairPendingJson() }["pending"] as? Map<*, *>)
+        } catch (failure: Exception) {
+            toast(fleetFailure(failure))
+            return
+        }
+        val nodeId = pending?.get("nodeId") as? String
+        if (pending == null || nodeId.isNullOrEmpty()) {
+            toast(getString(R.string.fleet_code_none))
+            return
+        }
+        val label = (pending["label"] as? String).orEmpty()
+        val fingerprint = (pending["fingerprint"] as? String)
+            ?: FleetModel.fingerprint(nodeId)
+        val address = (pending["address"] as? String).orEmpty()
+        val scopes = (pending["requestedScopes"] as? List<*>)
+            ?.mapNotNull { it as? String }
+            ?: emptyList()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_pending_title)
+            .setMessage(
+                getString(
+                    R.string.fleet_pending_body,
+                    label,
+                    fingerprint,
+                    address,
+                    scopes.joinToString(", ")
+                )
+            )
+            .setPositiveButton(R.string.fleet_approve) { _, _ ->
+                completePairing(accept = true, scopes = scopes)
+            }
+            .setNegativeButton(R.string.fleet_reject) { _, _ ->
+                completePairing(accept = false, scopes = emptyList())
+            }
+            .show()
+    }
+
+    private fun completePairing(accept: Boolean, scopes: List<String>) {
+        try {
+            fleetDoc {
+                it.peerPairCompleteJson(
+                    Json.encode(mapOf("accept" to accept, "scopes" to scopes))
+                )
+            }
+            toast(
+                getString(if (accept) R.string.fleet_approved else R.string.fleet_rejected)
+            )
+            if (accept) refreshFleet()
+        } catch (failure: Exception) {
+            toast(failure.message ?: getString(R.string.fleet_pair))
+        }
+    }
+
+    private fun showJoinDialog() {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val addressInput = EditText(this).apply {
+            hint = getString(R.string.fleet_join_address)
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val codeInput = EditText(this).apply {
+            hint = getString(R.string.fleet_join_code)
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+        }
+        column.addView(addressInput)
+        column.addView(codeInput)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_join_title)
+            .setMessage(R.string.fleet_pair_warning)
+            .setView(column)
+            .setPositiveButton(R.string.fleet_join_action) { _, _ ->
+                val address = addressInput.text.toString().trim()
+                val code = codeInput.text.toString().trim().uppercase()
+                if (address.isEmpty() || code.isEmpty()) {
+                    toast(getString(R.string.fleet_join_address))
+                    return@setPositiveButton
+                }
+                joinDevice(address, code)
+            }
+            .setNegativeButton(R.string.fleet_cancel, null)
+            .show()
+    }
+
+    private fun joinDevice(address: String, code: String) {
+        toast(getString(R.string.fleet_join_waiting))
+        Thread {
+            val result = runCatching {
+                fleetDoc {
+                    it.peerJoinJson(
+                        Json.encode(mapOf("address" to address, "code" to code))
+                    )
+                }
+            }
+            handler.post {
+                val document = result.getOrNull()
+                if (document == null) {
+                    toast(
+                        result.exceptionOrNull()?.let { fleetFailure(it) }
+                            ?: getString(R.string.fleet_join_action)
+                    )
+                    return@post
+                }
+                val peer = document["peer"] as? Map<*, *>
+                val nodeId = peer?.get("nodeId") as? String
+                if (peer == null || nodeId.isNullOrEmpty()) {
+                    toast(getString(R.string.fleet_join_action))
+                    return@post
+                }
+                showConfirmJoin(nodeId, peer)
+            }
+        }.start()
+    }
+
+    private fun showConfirmJoin(nodeId: String, peer: Map<*, *>) {
+        val fingerprint = (peer["fingerprint"] as? String)
+            ?: FleetModel.fingerprint(nodeId)
+        val label = (peer["label"] as? String).orEmpty()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_confirm_title)
+            .setMessage(getString(R.string.fleet_confirm_body, fingerprint, label))
+            .setPositiveButton(R.string.fleet_confirm) { _, _ ->
+                try {
+                    fleetDoc {
+                        it.peerConfirmJson(Json.encode(mapOf("nodeId" to nodeId)))
+                    }
+                    toast(getString(R.string.fleet_approved))
+                    refreshFleet()
+                } catch (failure: Exception) {
+                    toast(failure.message ?: getString(R.string.fleet_confirm))
+                }
+            }
+            .setNegativeButton(R.string.fleet_cancel, null)
+            .show()
+    }
+
+    private fun showPeerDialog(peer: Map<String, Any?>) {
+        val nodeId = peer["nodeId"] as? String ?: return
+        val label = (peer["label"] as? String).orEmpty()
+        val scopes = FleetModel.scopesText(peer)
+            .ifEmpty { getString(R.string.fleet_none_scopes) }
+        val message = buildString {
+            append(FleetModel.fingerprint(nodeId)).append('\n')
+            append(getString(R.string.fleet_address, (peer["address"] as? String).orEmpty()))
+                .append('\n')
+            append(getString(R.string.fleet_scopes, scopes)).append('\n')
+            append(getString(FleetModel.stateRes(peer["state"] as? String)))
+            val error = peer["lastError"] as? String
+            if (!error.isNullOrEmpty()) {
+                append('\n').append(getString(R.string.fleet_last_error, error))
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(label.ifEmpty { getString(R.string.fleet_paired_devices) })
+            .setMessage(message)
+            .setNeutralButton(R.string.fleet_refresh) { _, _ -> refreshFleet() }
+            .setNegativeButton(R.string.ui_close, null)
+            .setPositiveButton(R.string.fleet_remove) { _, _ ->
+                confirmRemovePeer(nodeId, label)
+            }
+            .show()
+    }
+
+    private fun confirmRemovePeer(nodeId: String, label: String) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_remove_title)
+            .setMessage(getString(R.string.fleet_remove_body, label.ifEmpty { nodeId }))
+            .setPositiveButton(R.string.fleet_remove) { _, _ ->
+                try {
+                    invoke(getString(R.string.fleet_remove)) { it.peerRemove(nodeId) }
+                    fleetPeers = fleetPeers.filter { it["nodeId"] != nodeId }
+                    lastFleetSignature = null
+                    toast(getString(R.string.fleet_removed))
+                    refreshNow()
+                } catch (failure: Exception) {
+                    toast(failure.message ?: getString(R.string.fleet_remove))
+                }
+            }
+            .setNegativeButton(R.string.fleet_cancel, null)
+            .show()
+    }
+
     private fun sshRow(target: Map<String, Any?>): View {
         val state = (target["state"] as? String) ?: "disconnected"
         val lamp = when (state) {
@@ -2344,6 +2836,7 @@ class GromActivity : Activity() {
             renderSsh()
             renderProjects()
             renderAlerts()
+            renderFleet()
         }
         val dashboard = DashboardModel.build(status)
         renderServing(dashboard)

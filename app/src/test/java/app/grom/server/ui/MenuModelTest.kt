@@ -25,6 +25,7 @@ class MenuModelTest {
         assertEquals(
             listOf(
                 MenuModel.KEY_SSH,
+                MenuModel.KEY_FLEET,
                 MenuModel.KEY_NOSTR,
                 MenuModel.KEY_PROJECTS,
                 MenuModel.KEY_ALERTS,
@@ -81,7 +82,7 @@ class MenuModelTest {
             .toSet()
         listOf(
             "ui_menu", "ui_menu_sections", "ui_close",
-            "menu_ssh_sub", "menu_nostr_sub", "menu_projects_sub",
+            "menu_ssh_sub", "menu_fleet_sub", "menu_nostr_sub", "menu_projects_sub",
             "menu_alerts_sub", "menu_access_sub", "menu_runtime_sub",
             "menu_update_sub", "menu_invite_sub", "menu_help_sub"
         ).forEach { name ->
@@ -94,6 +95,7 @@ class MenuModelTest {
         // The menu is the only way in now, so a renamed section cannot keep an
         // old title in one of the two places.
         assertEquals(R.string.ui_external, MenuModel.titleFor(MenuModel.KEY_SSH))
+        assertEquals(R.string.ui_fleet, MenuModel.titleFor(MenuModel.KEY_FLEET))
         assertEquals(R.string.ui_nostr_lightning, MenuModel.titleFor(MenuModel.KEY_NOSTR))
         assertEquals(R.string.ui_projects, MenuModel.titleFor(MenuModel.KEY_PROJECTS))
         assertEquals(R.string.ui_alerts, MenuModel.titleFor(MenuModel.KEY_ALERTS))

@@ -368,4 +368,77 @@
         <item quantity="one">%1$d server saved. At most %2$d can be connected at once; the rest stay idle until you connect them.</item>
         <item quantity="other">%1$d servers saved. At most %2$d can be connected at once; the rest stay idle until you connect them.</item>
     </plurals>
+
+    <!-- Fleet: device identity, pairing and the paired-device roster (D70-D75). -->
+    <string name="ui_fleet">Devices</string>
+    <string name="menu_fleet_sub">Pair your other phones and see their state</string>
+    <string name="fleet_hint">Each device has its own key. Pairing is mutual: both screens must confirm the same fingerprint. State is measured only when you open this screen or tap Refresh.</string>
+    <string name="fleet_this_device">This device</string>
+    <string name="fleet_identity_detail">%1$s \u00b7 %2$s</string>
+    <string name="fleet_identity_missing">Identity is unavailable.</string>
+    <string name="fleet_identity_error">The identity could not be read. Reset it only if you accept losing every pairing.</string>
+    <string name="fleet_copy_identity">Copy identity</string>
+    <string name="fleet_reset_identity">Reset identity</string>
+    <string name="fleet_identity_copied">Device identity copied</string>
+    <string name="fleet_identity_reset_title">Reset identity?</string>
+    <string name="fleet_identity_reset_body">Type RESET to replace this device key and forget every pairing. Other devices will see a stranger until you pair them again.</string>
+    <string name="fleet_identity_reset_hint">RESET</string>
+    <string name="fleet_identity_reset_action">Reset</string>
+    <string name="fleet_identity_reset_done">New identity created</string>
+    <string name="fleet_paired_devices">Paired devices</string>
+    <string name="fleet_none">No devices are paired yet.</string>
+    <string name="fleet_pair">Pair a device</string>
+    <string name="fleet_pair_pick">Pair a device</string>
+    <string name="fleet_pair_show">Show a code on this device</string>
+    <string name="fleet_pair_join">Enter a code from another device</string>
+    <string name="fleet_refresh">Refresh</string>
+    <string name="fleet_refreshed">Checked %1$d / %2$d</string>
+    <string name="fleet_state_alive">connected</string>
+    <string name="fleet_state_stale">last seen earlier</string>
+    <string name="fleet_state_unreachable">not reachable</string>
+    <string name="fleet_state_unknown">not checked yet</string>
+    <string name="fleet_last_error">Last error: %1$s</string>
+    <string name="fleet_address">Address: %1$s</string>
+    <string name="fleet_scopes">Scopes: %1$s</string>
+    <string name="fleet_none_scopes">none</string>
+    <string name="fleet_pair_warning">Only pair on a network you trust. Grom signs its requests but does not encrypt them, so another device on the same Wi-Fi can see that these devices exist.</string>
+    <string name="fleet_code_title">Pairing code</string>
+    <string name="fleet_code_body">On the other device choose Join and enter this code:
+
+%1$s
+
+The code expires in five minutes. Confirm the other device fingerprint before you approve it.</string>
+    <string name="fleet_code_check">Check now</string>
+    <string name="fleet_code_none">No device has entered the code yet.</string>
+    <string name="fleet_pending_title">Approve this device?</string>
+    <string name="fleet_pending_body">%1$s
+%2$s
+%3$s
+
+Requested: %4$s</string>
+    <string name="fleet_approve">Approve</string>
+    <string name="fleet_reject">Reject</string>
+    <string name="fleet_approved">Device paired</string>
+    <string name="fleet_rejected">Pairing rejected</string>
+    <string name="fleet_join_title">Join a device</string>
+    <string name="fleet_join_address">Address (host:port)</string>
+    <string name="fleet_join_code">8-character code</string>
+    <string name="fleet_join_action">Join</string>
+    <string name="fleet_join_waiting">Waiting for the other operator to approve…</string>
+    <string name="fleet_confirm_title">Confirm the other device</string>
+    <string name="fleet_confirm_body">Only continue if the other screen shows this fingerprint:
+
+%1$s
+
+%2$s</string>
+    <string name="fleet_confirm">Confirm</string>
+    <string name="fleet_cancel">Cancel</string>
+    <string name="fleet_removed">Device removed</string>
+    <string name="fleet_remove_title">Remove device?</string>
+    <string name="fleet_remove_body">This device will stop accepting requests signed by %1$s. Pair it again to restore access.</string>
+    <string name="fleet_remove">Remove</string>
+    <string name="fleet_unavailable">Devices is available only in the server role.</string>
+    <string name="fleet_data_plane_off">Turn on Public access first: pairing needs the public API.</string>
+    <string name="fleet_key_auth_required">Choose Key or Both authentication in Public access: paired devices sign their requests.</string>
+    <string name="fleet_checking">Checking…</string>
 </resources>
