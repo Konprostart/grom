@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "timeoutMs": 8000,
+  "devices": [
+    {
+      "name": "pixel-7",
+      "url": "http://192.168.1.20:47002",
+      "auth": "password",
+      "passwordEnv": "GROM_PIXEL7_PASSWORD"
+    },
+    {
+      "name": "pixel-4a",
+      "url": "http://192.168.1.21:47002",
+      "auth": "password",
+      "passwordFile": "~/.config/grom/secrets/pixel-4a.txt"
+    },
+    {
+      "name": "home-vps",
+      "url": "http://100.64.0.5:47002",
+      "auth": "key",
+      "keyFile": "~/.config/grom/keys/home-vps.pem",
+      "keyId": "0123456789abcdef"
+    }
+  ]
+}

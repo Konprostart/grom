@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# grom-fleet — read-only view of the Grom servers you run.
+#
+# Phase A of the fleet plan (docs/FLEET.md): this tool never touches the Grom
+# tree, only the documented public data plane. It needs a JDK 17 and nothing
+# else, so it runs as a single-file Java program without a build step.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  JAVA="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+  JAVA="java"
+else
+  echo "grom-fleet: a JDK 17 is required (set JAVA_HOME or put java on PATH)" >&2
+  exit 2
+fi
+
+exec "$JAVA" --source 17 "$here/fleet/GromFleet.java" "$@"

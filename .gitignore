@@ -25,3 +25,8 @@ node-out/
 
 # Test-only keystores ARE committed on purpose (see docs/000-decisions.md D4).
 !keys/*.jks
+
+# A fleet config names your devices and points at their credentials. Keep the
+# real one out of git; tools/fleet/fleet.example.json is the tracked template.
+fleet.json
+*.pem
