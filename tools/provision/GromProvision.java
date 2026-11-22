@@ -132,6 +132,7 @@ public final class GromProvision {
             case "plan" -> cmdPlan(cli);
             case "apply" -> cmdApply(cli);
             case "emit" -> cmdEmit(cli);
+            case "doctor" -> cmdDoctor(cli);
             default -> throw new ToolException("unknown command: " + cli.command, 2);
         };
     }
@@ -446,6 +447,24 @@ public final class GromProvision {
     static Installed readInstalled(Adb adb, String serial) throws ToolException {
         Result r = adb.exec(List.of("-s", serial, "shell", "dumpsys", "package", PKG), PROBE_TIMEOUT_MS);
         return parseInstalled(r.out());
+    }
+
+    /**
+     * The same question, but with "no answer" as its own answer.
+     *
+     * [parseBatteryExempt] returns `false` for an empty reply because the
+     * provisioning path only needs "should I ask for the exemption". The doctor
+     * cannot afford that: on this screen `false` means "measured, and it is not
+     * exempt", so an unreadable reply must stay `null` and be printed as
+     * "unknown" (D80, D81).
+     */
+    static Boolean parseBatteryExemptOrNull(String out) {
+        if (out == null) return null;
+        String trimmed = out.strip();
+        if (trimmed.isEmpty()) return null;
+        if (trimmed.contains("Unable to find") || trimmed.contains("Exception")) return null;
+        if (trimmed.equals("null")) return null;
+        return parseBatteryExempt(out);
     }
 
     static boolean parseBatteryExempt(String out) {
@@ -1385,11 +1404,13 @@ public final class GromProvision {
         boolean version;
         boolean selfTest;
         String hubFile;
+        boolean fix;
 
-        static final Set<String> COMMANDS = Set.of("list", "plan", "apply", "emit");
+        static final Set<String> COMMANDS = Set.of("list", "plan", "apply", "emit", "doctor");
 
         static final Set<String> BOOLEAN_OPTIONS =
-                Set.of("-h", "--help", "--version", "--self-test", "--json", "--force", "--no-battery");
+                Set.of("-h", "--help", "--version", "--self-test", "--json", "--force",
+                        "--no-battery", "--fix");
 
         static Cli parse(String[] args) throws ToolException {
             // `--opt=value` is normalised to two tokens first, so the loop below
@@ -1430,6 +1451,7 @@ public final class GromProvision {
                     case "--json" -> cli.json = true;
                     case "--force" -> cli.force = true;
                     case "--no-battery" -> cli.noBattery = true;
+                    case "--fix" -> cli.fix = true;
                     case "--adb" -> cli.adbPath = take(tokens, ++i, arg);
                     case "--apk" -> cli.apk = take(tokens, ++i, arg);
                     case "--flavour" -> cli.flavour = take(tokens, ++i, arg);
@@ -1481,6 +1503,8 @@ public final class GromProvision {
                   apply    install the APK, exempt it from battery optimisation,
                            and give the phone its own SSH forward port
                   emit     turn the provisioning state into a hub.json for grom-hub
+                  doctor   read the settings Android does not show an app, and
+                           optionally fix the two that are safe (see --fix)
 
                 options:
                   --apk PATH        the APK to install (required by apply)
@@ -1492,6 +1516,9 @@ public final class GromProvision {
                   --force           install even when the APK already matches
                   --no-battery      do not touch battery optimisation
                   --hub FILE        emit: write hub.json here instead of stdout
+                  --fix             doctor: whitelist the package from Doze and set
+                                    the legacy Wi-Fi sleep policy (API 28 and older).
+                                    No appops change, no package removal.
                   --json            machine-readable output
                   --self-test       run the built-in tests (needs no phone)
                   -h, --help        this text
@@ -1505,6 +1532,233 @@ public final class GromProvision {
                 The tool only ever reads, installs the APK you pass, and asks for a
                 battery exemption. It never removes packages, wipes data or restarts
                 a phone. See docs/PROVISION.md.""");
+    }
+
+    // --------------------------------------------------------- doctor (D80-D84)
+
+    /**
+     * What one phone answered when asked the questions an app cannot ask itself
+     * (D81).
+     *
+     * Every field is a String or a tri-state, never a guess: "not answered" and
+     * "0" are different values here for the same reason they are different in
+     * the app. `null` means the command failed or the ROM does not know it.
+     */
+    static final class DoctorReport {
+        String serial;
+        String label = "";
+        int sdk;
+        Boolean dozeWhitelisted;
+        String appopsBackground;
+        String maxPhantomProcesses;
+        String phantomMonitor;
+        String wifiSleepPolicy;
+        int forwardPort;
+        List<String> findings = new ArrayList<>();
+        List<String> fixes = new ArrayList<>();
+
+        /** True when nothing was measured or something needs attention. */
+        boolean needsAttention() {
+            if (dozeWhitelisted == null) return true;
+            if (Boolean.FALSE.equals(dozeWhitelisted)) return true;
+            return !findings.isEmpty();
+        }
+    }
+
+    /**
+     * Reads (and, with `--fix`, adjusts) the settings only a computer can see.
+     *
+     * The line this command does not cross: it never changes an app-op, never
+     * removes a package and never touches a phone it cannot identify. `--fix`
+     * is limited to the two changes that are both reversible and documented —
+     * the Doze whitelist entry for Grom and the legacy Wi-Fi sleep policy — and
+     * both are re-read afterwards, so the report says what the phone now
+     * reports rather than what the tool asked for.
+     */
+    static int cmdDoctor(Cli cli) throws ToolException {
+        Adb adb = new Adb(resolveAdb(cli));
+        List<Device> selected = devicesOf(adb, cli);
+        if (selected.isEmpty()) {
+            System.err.println("grom-provision: no phones detected");
+            return 2;
+        }
+
+        State state = State.load(Paths.get(cli.stateFile));
+        List<DoctorReport> reports = new ArrayList<>();
+        for (Device d : selected) {
+            DoctorReport r = new DoctorReport();
+            r.serial = d.serial;
+            StoredDevice stored = state.find(d.serial);
+            if (stored != null) {
+                r.label = stored.label == null ? "" : stored.label;
+                r.forwardPort = stored.forwardPort;
+            }
+            if (!"device".equals(d.adbState)) {
+                r.findings.add("adb-state:" + d.adbState);
+                reports.add(r);
+                continue;
+            }
+            Facts facts = readFacts(adb, d.serial);
+            r.sdk = facts.sdk();
+            readDoctor(adb, r);
+
+            if (cli.fix) {
+                applyDoctorFixes(adb, r);
+                // Re-read: the report must be a measurement of the phone after
+                // the change, not a recording of the request.
+                readDoctor(adb, r);
+            }
+            reports.add(r);
+        }
+
+        if (cli.json) {
+            System.out.print(renderDoctorJson(reports));
+        } else {
+            printDoctorTable(reports, cli.fix);
+        }
+        return reports.stream().anyMatch(DoctorReport::needsAttention) ? 1 : 0;
+    }
+
+    /** The read-only half. Every call here only asks. */
+    static void readDoctor(Adb adb, DoctorReport r) throws ToolException {
+        r.dozeWhitelisted = parseBatteryExemptOrNull(
+                adb.exec(List.of("-s", r.serial, "shell", "dumpsys", "deviceidle", "whitelist"),
+                        PROBE_TIMEOUT_MS).out());
+        r.appopsBackground = firstLine(adb.exec(
+                List.of("-s", r.serial, "shell", "cmd", "appops", "get", PKG,
+                        "RUN_ANY_IN_BACKGROUND"),
+                PROBE_TIMEOUT_MS).out());
+        r.maxPhantomProcesses = firstLine(adb.exec(
+                List.of("-s", r.serial, "shell", "device_config", "get", "activity_manager",
+                        "max_phantom_processes"),
+                PROBE_TIMEOUT_MS).out());
+        r.phantomMonitor = firstLine(adb.exec(
+                List.of("-s", r.serial, "shell", "settings", "get", "global",
+                        "settings_enable_monitor_phantom_procs"),
+                PROBE_TIMEOUT_MS).out());
+        r.wifiSleepPolicy = firstLine(adb.exec(
+                List.of("-s", r.serial, "shell", "settings", "get", "global", "wifi_sleep_policy"),
+                PROBE_TIMEOUT_MS).out());
+
+        r.findings = doctorFindings(r);
+    }
+
+    /**
+     * The findings, in the same vocabulary the app uses. Only facts this tool
+     * actually read produce a finding; an unanswered command is reported by
+     * [DoctorReport.needsAttention] through the null whitelist, not by an
+     * invented sentence.
+     */
+    static List<String> doctorFindings(DoctorReport r) {
+        List<String> findings = new ArrayList<>();
+        if (Boolean.FALSE.equals(r.dozeWhitelisted)) {
+            findings.add("DOCTOR_NOT_WHITELISTED");
+        }
+        if (r.appopsBackground != null && r.appopsBackground.contains("ignore")) {
+            findings.add("DOCTOR_APPOPS_IGNORED");
+        }
+        if (r.appopsBackground != null && r.appopsBackground.contains("deny")) {
+            findings.add("DOCTOR_APPOPS_DENIED");
+        }
+        if (r.phantomMonitor != null && r.phantomMonitor.equals("true")) {
+            findings.add("DOCTOR_PHANTOM_MONITOR_ON");
+        }
+        if (r.wifiSleepPolicy != null && r.sdk > 0 && r.sdk <= 28
+                && !r.wifiSleepPolicy.equals("2")) {
+            findings.add("DOCTOR_WIFI_SLEEP_NOT_ALWAYS");
+        }
+        return findings;
+    }
+
+    /**
+     * The two allowed changes, each re-read by the caller. `settings put` on a
+     * modern Android is accepted and ignored for `wifi_sleep_policy`, so the
+     * change is attempted only where it has an effect and the reason is printed
+     * rather than implied.
+     */
+    static void applyDoctorFixes(Adb adb, DoctorReport r) throws ToolException {
+        if (Boolean.FALSE.equals(r.dozeWhitelisted)) {
+            adb.exec(List.of("-s", r.serial, "shell", "dumpsys", "deviceidle", "whitelist",
+                    "+" + PKG), PROBE_TIMEOUT_MS);
+            r.fixes.add("DOCTOR_FIX_WHITELIST");
+        }
+        if (r.sdk > 0 && r.sdk <= 28) {
+            adb.exec(List.of("-s", r.serial, "shell", "settings", "put", "global",
+                    "wifi_sleep_policy", "2"), PROBE_TIMEOUT_MS);
+            r.fixes.add("DOCTOR_FIX_WIFI_SLEEP");
+        }
+    }
+
+    static void printDoctorTable(List<DoctorReport> reports, boolean fixed) {
+        for (DoctorReport r : reports) {
+            String name = r.label.isBlank() ? r.serial : r.label;
+            System.out.println();
+            System.out.println(name + "  (" + r.serial + ")");
+            System.out.println("  " + line("doze whitelist", truth(r.dozeWhitelisted)));
+            System.out.println("  " + line("appops background", orUnknown(r.appopsBackground)));
+            System.out.println("  " + line("max phantom processes", orUnknown(r.maxPhantomProcesses)));
+            System.out.println("  " + line("phantom monitor", orUnknown(r.phantomMonitor)));
+            System.out.println("  " + line("wifi sleep policy", orUnknown(r.wifiSleepPolicy)));
+            for (String fix : r.fixes) {
+                System.out.println("  fixed: " + fix);
+            }
+            if (r.findings.isEmpty()) {
+                System.out.println("  findings: none");
+            } else {
+                System.out.println("  findings: " + String.join(", ", r.findings));
+            }
+        }
+        System.out.println();
+        if (!fixed) {
+            System.out.println("Read-only. `--fix` may add the Doze whitelist entry and set the");
+            System.out.println("legacy Wi-Fi sleep policy (API 28 and older); it changes nothing else.");
+        }
+        System.out.println("A setting Android does not expose is reported as \"unknown\", never as 0.");
+    }
+
+    static String renderDoctorJson(List<DoctorReport> reports) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n  \"version\": 1,\n  \"devices\": [\n");
+        for (int i = 0; i < reports.size(); i++) {
+            DoctorReport r = reports.get(i);
+            sb.append("    {\n");
+            sb.append("      \"serial\": ").append(q(r.serial)).append(",\n");
+            sb.append("      \"label\": ").append(q(r.label)).append(",\n");
+            sb.append("      \"sdk\": ").append(r.sdk).append(",\n");
+            sb.append("      \"dozeWhitelisted\": ").append(r.dozeWhitelisted == null
+                    ? "null" : r.dozeWhitelisted.toString()).append(",\n");
+            sb.append("      \"appopsBackground\": ").append(q(r.appopsBackground)).append(",\n");
+            sb.append("      \"maxPhantomProcesses\": ").append(q(r.maxPhantomProcesses)).append(",\n");
+            sb.append("      \"phantomMonitor\": ").append(q(r.phantomMonitor)).append(",\n");
+            sb.append("      \"wifiSleepPolicy\": ").append(q(r.wifiSleepPolicy)).append(",\n");
+            sb.append("      \"forwardPort\": ").append(r.forwardPort).append(",\n");
+            sb.append("      \"findings\": [");
+            for (int j = 0; j < r.findings.size(); j++) {
+                sb.append(j == 0 ? "" : ", ").append(q(r.findings.get(j)));
+            }
+            sb.append("],\n");
+            sb.append("      \"fixes\": [");
+            for (int j = 0; j < r.fixes.size(); j++) {
+                sb.append(j == 0 ? "" : ", ").append(q(r.fixes.get(j)));
+            }
+            sb.append("]\n");
+            sb.append("    }").append(i + 1 < reports.size() ? "," : "").append("\n");
+        }
+        sb.append("  ]\n}\n");
+        return sb.toString();
+    }
+
+    static String truth(Boolean value) {
+        if (value == null) return "unknown";
+        return value ? "yes" : "no";
+    }
+
+    static String orUnknown(String value) {
+        return value == null || value.isBlank() ? "unknown" : value;
+    }
+
+    static String line(String label, String value) {
+        return String.format(Locale.US, "%-24s %s", label, value);
     }
 
     // --------------------------------------------------------------- self test
@@ -1599,6 +1853,37 @@ public final class GromProvision {
                             ;;
                         esac
                         ;;
+                      cmd)
+                        # adb shell cmd appops get <pkg> RUN_ANY_IN_BACKGROUND
+                        if [ "${3:-}" = "appops" ]; then
+                          if [ -f "$scen/appops/$serial" ]; then
+                            cat "$scen/appops/$serial"
+                          else
+                            echo "app.grom.server: No operations."
+                          fi
+                        fi
+                        ;;
+                      device_config)
+                        if [ -f "$scen/phantom/$serial" ]; then
+                          cat "$scen/phantom/$serial"
+                        else
+                          echo "null"
+                        fi
+                        ;;
+                      settings)
+                        which="${3:-}"
+                        key="${5:-}"
+                        if [ "$which" = "put" ]; then
+                          mkdir -p "$scen/settings"
+                          printf '%s\n' "${6:-}" > "$scen/settings/$serial.$key"
+                          exit 0
+                        fi
+                        if [ -f "$scen/settings/$serial.$key" ]; then
+                          cat "$scen/settings/$serial.$key"
+                        else
+                          echo "null"
+                        fi
+                        ;;
                       *)
                         ;;
                     esac
@@ -1628,6 +1913,7 @@ public final class GromProvision {
                 planTests();
                 applyTests();
                 emitTests();
+                doctorTests();
                 cliTests();
             } finally {
                 deleteTree(root);
@@ -1717,6 +2003,46 @@ public final class GromProvision {
 
         static void installOutput(Path scen, String serial, String line) throws IOException {
             Files.writeString(scen.resolve("install").resolve(serial), line + "\n", StandardCharsets.UTF_8);
+        }
+
+        /**
+         * The commands the tool is allowed to issue at all (D79, D81).
+         *
+         * The doctor tests use this instead of listing forbidden words: a command
+         * that is not on this list fails the test, so a future edit cannot add a
+         * destructive verb and quietly pass. `install` is here because `apply`
+         * needs it; the doctor run never issues it and the call sites say so.
+         */
+        static final List<String> ALLOWED_COMMAND_PREFIXES = List.of(
+                "devices -l",
+                "install",
+                "shell getprop",
+                "shell dumpsys package",
+                "shell dumpsys deviceidle whitelist",
+                "shell cmd appops get",
+                "shell device_config get",
+                "shell settings get",
+                "shell settings put global wifi_sleep_policy 2");
+
+        /** Returns the invocations that are not on the allow-list. */
+        static List<String> allowedInvocationsOnly(Path scen) throws IOException {
+            List<String> unexpected = new ArrayList<>();
+            for (String raw : invocations(scen).split("\n")) {
+                String line = raw.strip();
+                if (line.isEmpty()) continue;
+                String rest = line;
+                if (rest.startsWith("-s ")) {
+                    int space = rest.indexOf(' ', 3);
+                    rest = space < 0 ? "" : rest.substring(space + 1);
+                }
+                final String candidate = rest;
+                boolean allowed = ALLOWED_COMMAND_PREFIXES.stream()
+                        .anyMatch(prefix -> candidate.startsWith(prefix));
+                if (!allowed) {
+                    unexpected.add(line);
+                }
+            }
+            return unexpected;
         }
 
         static String invocations(Path scen) throws IOException {
@@ -2181,6 +2507,157 @@ public final class GromProvision {
         }
 
         // -- cli -----------------------------------------------------------
+
+        // -- doctor -------------------------------------------------------
+
+        static void appops(Path scen, String serial, String line) throws IOException {
+            Files.createDirectories(scen.resolve("appops"));
+            Files.writeString(scen.resolve("appops").resolve(serial), line + "\n",
+                    StandardCharsets.UTF_8);
+        }
+
+        static void setting(Path scen, String serial, String key, String value)
+                throws IOException {
+            Files.createDirectories(scen.resolve("settings"));
+            Files.writeString(scen.resolve("settings").resolve(serial + "." + key), value + "\n",
+                    StandardCharsets.UTF_8);
+        }
+
+        static void phantom(Path scen, String serial, String value) throws IOException {
+            Files.createDirectories(scen.resolve("phantom"));
+            Files.writeString(scen.resolve("phantom").resolve(serial), value + "\n",
+                    StandardCharsets.UTF_8);
+        }
+
+        static void doctorTests() throws Exception {
+            Path scen = scenario("doctor");
+            devices(scen, """
+                    List of devices attached
+                    R58M11111    device model:Pixel_7 transport_id:1
+                    R58M22222    device model:Pixel_4a transport_id:2
+
+                    """);
+            props(scen, "R58M11111", phone("Pixel 7", "14", 34, "arm64-v8a"));
+            props(scen, "R58M22222", phone("Pixel 4a", "9", 28, "arm64-v8a"));
+            // Phone one is exempt and unrestricted; phone two is neither.
+            battery(scen, "R58M11111", true);
+            battery(scen, "R58M22222", false);
+            appops(scen, "R58M11111", "app.grom.server: No operations.");
+            appops(scen, "R58M22222", "RUN_ANY_IN_BACKGROUND: deny");
+            phantom(scen, "R58M11111", "null");
+            phantom(scen, "R58M22222", "null");
+            setting(scen, "R58M11111", "wifi_sleep_policy", "2");
+            setting(scen, "R58M22222", "wifi_sleep_policy", "0");
+            Path stateFile = scen.resolve("provision.json");
+
+            resetInvocations(scen);
+            Captured read = invoke("doctor", "--state", stateFile.toString());
+            // One phone is fine, the other is not: 1 is "a phone needs attention".
+            check("doctor: exits 1 when a phone needs attention", read.code() == 1);
+            check("doctor: names the phones", read.out().contains("R58M11111")
+                    && read.out().contains("R58M22222"));
+            // The column width is a formatting detail; what must be true is that
+            // the row exists and never claims "unknown" for a phone that answered.
+            check("doctor: reports the whitelist as measured",
+                    read.out().contains("doze whitelist")
+                            && !read.out().contains("doze whitelist  unknown"));
+            check("doctor: reports a deny from appops",
+                    read.out().contains("DOCTOR_APPOPS_DENIED"));
+            check("doctor: reports a phone that is not whitelisted",
+                    read.out().contains("DOCTOR_NOT_WHITELISTED"));
+            check("doctor: legacy wifi finding only where it applies",
+                    read.out().contains("DOCTOR_WIFI_SLEEP_NOT_ALWAYS"));
+
+            String readOnly = invocations(scen);
+            check("doctor: read-only run changes nothing",
+                    !readOnly.contains("settings put")
+                            && !readOnly.contains("+app.grom.server"));
+            // Stronger than a word blacklist: every command the run issued must be
+            // on the read allow-list, so a command nobody thought of cannot hide.
+            List<String> unexpected = allowedInvocationsOnly(scen);
+            check("doctor: every read-only command is on the allow-list" +
+                    (unexpected.isEmpty() ? "" : " " + unexpected), unexpected.isEmpty());
+
+            Captured json = invoke("doctor", "--state", stateFile.toString(), "--json");
+            Object parsed = parseJsonOrNull(json.out());
+            check("doctor: json parses", parsed != null);
+            boolean jsonOk = false;
+            if (parsed instanceof Map<?, ?> map && map.get("devices") instanceof List<?> list
+                    && list.size() == 2 && list.get(0) instanceof Map<?, ?> row) {
+                jsonOk = Boolean.TRUE.equals(row.get("dozeWhitelisted"))
+                        && row.get("findings") instanceof List<?> findings
+                        && findings.isEmpty();
+            }
+            check("doctor: the healthy phone has no findings", jsonOk);
+            if (parsed instanceof Map<?, ?> map && map.get("devices") instanceof List<?> list
+                    && list.size() == 2 && list.get(1) instanceof Map<?, ?> row) {
+                check("doctor: the unhealthy phone is not whitelisted",
+                        Boolean.FALSE.equals(row.get("dozeWhitelisted")));
+                check("doctor: the unhealthy phone carries its appops finding",
+                        row.get("findings") instanceof List<?> f
+                                && f.contains("DOCTOR_APPOPS_DENIED"));
+            }
+
+            // -- --fix -----------------------------------------------------
+            resetInvocations(scen);
+            Captured fixed = invoke("doctor", "--state", stateFile.toString(), "--fix");
+            String withFix = invocations(scen);
+            check("doctor: --fix whitelists the package",
+                    withFix.contains("dumpsys deviceidle whitelist +app.grom.server"));
+            check("doctor: --fix reports the fix it applied",
+                    fixed.out().contains("DOCTOR_FIX_WHITELIST"));
+            // The appops deny must survive: --fix is not allowed to touch app-ops.
+            check("doctor: --fix leaves app-ops alone",
+                    !withFix.contains("appops set") && !withFix.contains("appops write"));
+            // `--fix` is the only mutating path, and even it must stay inside the
+            // same allow-list: two writes, nothing else.
+            List<String> fixUnexpected = allowedInvocationsOnly(scen);
+            check("doctor: --fix stays inside the allow-list" +
+                    (fixUnexpected.isEmpty() ? "" : " " + fixUnexpected),
+                    fixUnexpected.isEmpty());
+            long wifiPuts = withFix.lines()
+                    .filter(l -> l.contains("settings put global wifi_sleep_policy"))
+                    .count();
+            check("doctor: --fix writes the wifi policy only for API <= 28", wifiPuts == 1);
+
+            Captured after = invoke("doctor", "--state", stateFile.toString(), "--json");
+            boolean fixedRead = false;
+            if (parseJsonOrNull(after.out()) instanceof Map<?, ?> map
+                    && map.get("devices") instanceof List<?> list && list.size() == 2
+                    && list.get(1) instanceof Map<?, ?> row) {
+                fixedRead = Boolean.TRUE.equals(row.get("dozeWhitelisted"));
+            }
+            check("doctor: the whitelist change is verified, not assumed", fixedRead);
+
+            // -- an unanswered command --------------------------------------
+            Path silent = scenario("doctor-silent");
+            devices(silent, """
+                    List of devices attached
+                    R58M33333    device model:Pixel_4 transport_id:1
+
+                    """);
+            props(silent, "R58M33333", phone("Pixel 4", "13", 33, "arm64-v8a"));
+            Files.writeString(silent.resolve("battery").resolve("R58M33333"), "",
+                    StandardCharsets.UTF_8);
+            Captured unknown = invoke("doctor", "--state", silent.resolve("p.json").toString(),
+                    "--json");
+            boolean unknownOk = false;
+            if (parseJsonOrNull(unknown.out()) instanceof Map<?, ?> map
+                    && map.get("devices") instanceof List<?> list && list.size() == 1
+                    && list.get(0) instanceof Map<?, ?> row) {
+                // A phone that answers nothing is "unknown", never a measured 0.
+                unknownOk = row.containsKey("dozeWhitelisted")
+                        && row.get("dozeWhitelisted") == null
+                        && row.containsKey("appopsBackground");
+            }
+            check("doctor: an unanswered command never becomes a number", unknownOk);
+
+            // -- no phones --------------------------------------------------
+            Path empty = scenario("doctor-empty");
+            devices(empty, "List of devices attached\n\n");
+            Captured none = invoke("doctor", "--state", empty.resolve("p.json").toString());
+            check("doctor: no phones is exit 2, not a silent success", none.code() == 2);
+        }
 
         static void cliTests() {
             Captured help = invoke("--help");
