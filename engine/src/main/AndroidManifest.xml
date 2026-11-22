@@ -8,6 +8,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- The Doctor (D82). ACCESS_NETWORK_STATE only lets the screen name the
+         transport; it cannot read traffic. REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+         is what makes the one-tap "stop optimising this app" dialog possible, and
+         Grom is installed by hand rather than through Play, which is the store
+         policy that restricts it. No usage-stats, no queries-all-packages and no
+         overlay permission is declared: where a probe needs one of those, the
+         Doctor reports `unknown` instead of asking for it. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application>
         <!--
           Embedded default (D55): the service is private to the host application

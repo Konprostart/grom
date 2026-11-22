@@ -39,6 +39,11 @@ class GromService : Service() {
     override fun onCreate() {
         super.onCreate()
         runtime = ServerRuntime(applicationContext, logSink = { line -> Log.i(TAG, line) })
+        // The run marker (D83). Written before the service becomes foreground so
+        // a process that dies during startup is still counted: this is one file
+        // write, not a timer, and it is the only fact Doctor has to remember.
+        runCatching { runtime.beginRunSession() }
+            .onFailure { Log.w(TAG, "doctor marker could not be written") }
         startForegroundSafely()
     }
 
@@ -72,6 +77,10 @@ class GromService : Service() {
 
     override fun onDestroy() {
         runtime.stop()
+        // A clean stop is recorded before the notification flush so the marker is
+        // durable even if the flush runs out of window (D66, D83).
+        runCatching { runtime.endRunSession() }
+            .onFailure { Log.w(TAG, "doctor marker could not be closed") }
         // "Server stopped" is the one message that must beat process death: the
         // supervisor records it, the worker flushes here, and the wait is
         // bounded so Android's destroy window is respected (D66).
@@ -328,6 +337,13 @@ class GromService : Service() {
             } catch (failure: ApiException) {
                 throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
             }
+        }
+
+        // --------------------------------------------- API 8 (D80-D84, Doctor)
+
+        override fun doctorJson(): String {
+            requireSameSigner()
+            return runtime.doctorJson()
         }
     }
 
