@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "timeoutMs": 8000,
+  "pollSeconds": 30,
+  "listen": "127.0.0.1:47100",
+  "rosterFile": "roster.json",
+  "devices": [
+    {
+      "label": "pixel-7",
+      "url": "http://127.0.0.1:41001",
+      "nodeId": "0123456789abcdef"
+    },
+    {
+      "label": "pixel-4a",
+      "url": "http://127.0.0.1:41002"
+    }
+  ]
+}

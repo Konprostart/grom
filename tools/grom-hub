@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# grom-hub — a loopback roster for phones that reach the VPS through their own
+# reverse SSH tunnels.
+#
+# Phase C of the fleet plan (docs/HUB.md): this tool never touches the Grom
+# tree, only the documented public data plane. It needs a JDK 17 and nothing
+# else, so it runs as a single-file Java program without a build step.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  JAVA="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+  JAVA="java"
+else
+  echo "grom-hub: a JDK 17 is required (set JAVA_HOME or put java on PATH)" >&2
+  exit 2
+fi
+
+exec "$JAVA" --source 17 "$here/hub/GromHub.java" "$@"

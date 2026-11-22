@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# test-hub — protocol tests for tools/grom-hub.
+#
+# The tests start real HTTP servers on loopback and verify the hub's signed
+# requests exactly as the engine does, so a change to the canonical signature
+# string fails here before it fails against a phone.
+set -euo pipefail
+
+cd "$(dirname "$0")/.." || exit 1
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  JAVA="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+  JAVA="java"
+else
+  echo "test-hub: a JDK 17 is required (set JAVA_HOME or put java on PATH)" >&2
+  exit 2
+fi
+
+echo "== test-hub =="
+exec "$JAVA" --source 17 tools/hub/GromHub.java --self-test
