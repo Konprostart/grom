@@ -54,6 +54,8 @@ import app.grom.server.superserver.nostr.RemoteBridgeHint
 import app.grom.server.superserver.plugins.lightning.ExternalNodeKind
 import app.grom.server.superserver.plugins.lightning.ExternalNodeRef
 import app.grom.server.ui.DashboardModel
+import app.grom.server.ui.DoctorModel
+import app.grom.server.ui.FactsRow
 import app.grom.server.ui.FleetModel
 import app.grom.server.ui.GromTheme
 import app.grom.server.ui.HelpModel
@@ -160,6 +162,19 @@ class GromActivity : Activity() {
     private var fleetLoaded = false
     private var fleetRefreshing = false
     private var lastFleetSignature: String? = null
+
+    // Doctor (D80-D84). The document is the engine's measurement; this screen
+    // only paints it, so nothing here can make a lamp greener than the engine
+    // allowed.
+    private lateinit var doctorVerdict: TextView
+    private lateinit var doctorVerdictLamp: View
+    private lateinit var doctorSubtitle: TextView
+    private lateinit var doctorChecks: LinearLayout
+    private lateinit var doctorFacts: LinearLayout
+    private lateinit var doctorDetail: TextView
+    private var doctorDocument: Map<*, *>? = null
+    private var doctorMeasuredAtMs = 0L
+    private var lastDoctorSignature: String? = null
 
     /** Telegram alerts (D65). The token is never displayed, only "set". */
     private lateinit var alertsEnableRow: Pair<LinearLayout, TextView>
@@ -430,6 +445,7 @@ class GromActivity : Activity() {
         panel(MenuModel.KEY_HELP) { buildHelpSection(it) }
         if (!BuildConfig.GROMSERVER) return
         panel(MenuModel.KEY_RUNTIME) { buildRuntimeSection(it) }
+        panel(MenuModel.KEY_DOCTOR) { buildDoctorSection(it) }
         panel(MenuModel.KEY_SSH) { buildSshSection(it) }
         panel(MenuModel.KEY_FLEET) { buildFleetSection(it) }
         panel(MenuModel.KEY_NOSTR) { buildNostrSection(it) }
@@ -587,6 +603,8 @@ class GromActivity : Activity() {
         render()
         // Probes run when the operator asks, never in the background (D74).
         if (key == MenuModel.KEY_FLEET && !fleetLoaded) refreshFleet()
+        // A measurement, on demand, when the operator opens the screen (D74, D80).
+        if (key == MenuModel.KEY_DOCTOR) refreshDoctor()
     }
 
     // ---------------------------------------------------------- section bodies
@@ -664,6 +682,124 @@ class GromActivity : Activity() {
             addView(bootValue)
         }
         body.addView(bootRow)
+    }
+
+    /**
+     * The Doctor section (D80).
+     *
+     * Three groups, and the separation is the point: the **verdict** and the
+     * checks carry lamps because they are measurements; "Right now" has no lamps
+     * because a hot phone is context, not a diagnosis; and the limits block says
+     * out loud what an app cannot see, so a grey row is never mistaken for a
+     * missing feature.
+     */
+    private fun buildDoctorSection(body: LinearLayout) {
+        if (!BuildConfig.GROMSERVER) {
+            body.addView(text(getString(R.string.doctor_unavailable), 12f, palette.muted))
+            return
+        }
+        body.addView(text(getString(R.string.doctor_hint), 12f, palette.muted))
+        body.addView(gap(12))
+
+        // --- verdict -------------------------------------------------------
+        val verdictRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        doctorVerdictLamp = lampView(Lamp.UNKNOWN, palette)
+        verdictRow.addView(doctorVerdictLamp)
+        verdictRow.addView(gap(8))
+        doctorVerdict = text("", 16f, palette.onSurface, Typeface.BOLD)
+        verdictRow.addView(doctorVerdict)
+        body.addView(verdictRow)
+        doctorSubtitle = text("", 11f, palette.muted)
+        body.addView(gap(3))
+        body.addView(doctorSubtitle)
+
+        // --- checks --------------------------------------------------------
+        body.addView(divider(palette))
+        body.addView(label(getString(R.string.doctor_section_checks), palette))
+        doctorChecks = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(doctorChecks)
+
+        // --- right now -----------------------------------------------------
+        body.addView(divider(palette))
+        body.addView(label(getString(R.string.doctor_section_now), palette))
+        doctorFacts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(doctorFacts)
+
+        // --- limits --------------------------------------------------------
+        body.addView(divider(palette))
+        body.addView(label(getString(R.string.doctor_section_limits), palette))
+        body.addView(gap(4))
+        body.addView(text(getString(R.string.doctor_limits_body), 11f, palette.muted))
+        body.addView(gap(8))
+        body.addView(
+            text(
+                getString(R.string.doctor_adb_commands, packageName),
+                10f,
+                palette.muted
+            ).apply { typeface = Typeface.MONOSPACE }
+        )
+        body.addView(gap(8))
+        body.addView(docButton(R.string.doctor_copy_adb) { copyText(getString(R.string.doctor_adb_commands, packageName), R.string.doctor_adb_copied) })
+
+        // --- actions -------------------------------------------------------
+        body.addView(divider(palette))
+        body.addView(label(getString(R.string.doctor_section_actions), palette))
+        body.addView(
+            docButton(R.string.doctor_refresh) { refreshDoctor() }
+        )
+        body.addView(gap(6))
+        body.addView(
+            docButton(R.string.doctor_copy) { copyText(Json.encode(doctorDocument ?: emptyMap<String, Any?>()), R.string.doctor_copied) }
+        )
+        body.addView(gap(6))
+        body.addView(
+            docButton(R.string.doctor_open_battery_exempt) { confirmBatteryExemption() }
+        )
+        body.addView(gap(6))
+        body.addView(
+            docButton(R.string.doctor_open_battery) {
+                openSystemSettings(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            }
+        )
+        body.addView(gap(6))
+        body.addView(
+            docButton(R.string.doctor_open_notifications) {
+                openSystemSettings(
+                    android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+                    android.provider.Settings.EXTRA_APP_PACKAGE to packageName
+                )
+            }
+        )
+        body.addView(gap(6))
+        body.addView(
+            docButton(R.string.doctor_open_app) {
+                openSystemSettings(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    null,
+                    "package:$packageName"
+                )
+            }
+        )
+        doctorDetail = text("", 11f, palette.muted)
+        body.addView(gap(8))
+        body.addView(doctorDetail)
+    }
+
+    private fun docButton(res: Int, onClick: () -> Unit): TextView = pill(
+        value = getString(res),
+        textColor = palette.onSurface,
+        fill = palette.background,
+        rippleColor = palette.ripple,
+        stroke = palette.border,
+        onClick = onClick
+    ).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
     }
 
     private fun buildSshSection(body: LinearLayout) {
@@ -1693,6 +1829,201 @@ class GromActivity : Activity() {
     }
 
     // -------------------------------------------------------------- SSH bridge
+
+    // -------------------------------------------------------------- Doctor
+
+    /**
+     * Measures again. The probe is synchronous (a handful of binder calls), so it
+     * runs on a worker thread and never on the main thread; the same call is made
+     * when the section is opened, and never in the background (D74, D80).
+     */
+    private fun refreshDoctor() {
+        if (!BuildConfig.GROMSERVER || !connected) {
+            renderDoctor()
+            return
+        }
+        Thread {
+            val document = client.call(null) {
+                JsonParser.parseObjectOrNull(it.doctorJson())
+            }
+            handler.post {
+                if (document != null) {
+                    doctorDocument = document
+                    doctorMeasuredAtMs = (document["measuredAtMs"] as? Number)?.toLong() ?: 0L
+                }
+                renderDoctor()
+            }
+        }.start()
+    }
+
+    /**
+     * Paints the last measurement. It never invents a row: with no document every
+     * check stays grey and the headline says "not measured", because that is
+     * exactly what Grom knows when the Binder is not bound.
+     */
+    private fun renderDoctor() {
+        if (!BuildConfig.GROMSERVER || !::doctorVerdict.isInitialized) return
+
+        val verdict = doctorDocument?.get("verdict") as? String
+        val rows = DoctorModel.rows(doctorDocument)
+        val facts = DoctorModel.facts(
+            doctorDocument,
+            getString(R.string.doctor_level_unknown)
+        )
+        val signature = buildString {
+            append(verdict)
+            for (row in rows) append('|').append(row.id).append(':').append(row.lamp)
+            for (fact in facts) append('|').append(fact.valueText)
+            append('|').append(connected)
+        }
+        if (signature == lastDoctorSignature) return
+        lastDoctorSignature = signature
+
+        repaintLamp(doctorVerdictLamp, DoctorModel.verdictLamp(verdict), palette)
+        doctorVerdict.text = getString(DoctorModel.verdictRes(verdict))
+        doctorVerdict.setTextColor(
+            when (DoctorModel.verdictLamp(verdict)) {
+                Lamp.ON -> palette.positive
+                Lamp.OFF -> palette.negative
+                Lamp.UNKNOWN -> palette.muted
+            }
+        )
+        val attention = DoctorModel.attentionCount(doctorDocument)
+        val unknown = DoctorModel.unknownCount(doctorDocument)
+        val age = DoctorModel.relativeAge(
+            doctorMeasuredAtMs,
+            getString(R.string.doctor_level_unknown)
+        )
+        doctorSubtitle.text = when {
+            !connected -> getString(R.string.doctor_not_running)
+            doctorMeasuredAtMs <= 0L -> ""
+            attention > 0 -> resources.getQuantityString(
+                R.plurals.doctor_measured_at_attention,
+                attention,
+                age,
+                attention
+            )
+            unknown > 0 -> resources.getQuantityString(
+                R.plurals.doctor_measured_at_unknown,
+                unknown,
+                age,
+                unknown
+            )
+            else -> getString(R.string.doctor_measured_at, age)
+        }
+
+        doctorChecks.removeAllViews()
+        for (row in rows) {
+            val line = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(9), 0, dp(9))
+            }
+            line.addView(lampView(row.lamp, palette))
+            line.addView(gap(8))
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            column.addView(text(getString(row.titleRes), 14f, palette.onSurface))
+            if (row.detailRes != 0) {
+                column.addView(gap(2))
+                column.addView(text(getString(row.detailRes), 11f, palette.muted))
+            }
+            line.addView(
+                column,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            line.addView(
+                text(
+                    getString(row.valueRes),
+                    12f,
+                    when (row.lamp) {
+                        Lamp.ON -> palette.positive
+                        Lamp.OFF -> palette.negative
+                        Lamp.UNKNOWN -> palette.muted
+                    },
+                    gravity = Gravity.END
+                )
+            )
+            doctorChecks.addView(line)
+            doctorChecks.addView(divider(palette))
+        }
+
+        doctorFacts.removeAllViews()
+        if (facts.isEmpty()) {
+            doctorFacts.addView(text(getString(R.string.doctor_verdict_nothing_measured), 12f, palette.muted))
+        } else {
+            for (fact in facts) {
+                doctorFacts.addView(factLine(fact))
+            }
+        }
+
+        doctorDetail.text = when {
+            connected -> ""
+            else -> disconnectReason?.let { getString(R.string.detail_ipc_reason, it) }
+                ?: getString(R.string.detail_ipc_unbound)
+        }
+    }
+
+    /** One "Right now" line: no lamp on purpose (see [DoctorModel]). */
+    private fun factLine(fact: FactsRow): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(5), 0, dp(5))
+        addView(
+            text(getString(fact.labelRes), 12f, palette.muted),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        addView(text(fact.valueText, 12f, palette.onSurface, gravity = Gravity.END))
+    }
+
+    /**
+     * Opens a system settings page. A vendor ROM without that page throws
+     * `ActivityNotFoundException`; the screen says so instead of crashing.
+     */
+    private fun openSystemSettings(action: String, extra: Pair<String, String>? = null, data: String? = null) {
+        val intent = Intent(action)
+        if (extra != null) intent.putExtra(extra.first, extra.second)
+        if (data != null) intent.data = Uri.parse(data)
+        try {
+            startActivity(intent)
+        } catch (failure: Exception) {
+            toast(getString(R.string.doctor_open_failed))
+        }
+    }
+
+    /**
+     * The one system change this screen is allowed to *request* (D82). The
+     * dialog is Android's own; Grom never sets the exemption itself, and the
+     * confirmation explains that before the request is made.
+     *
+     * `BatteryLife` is suppressed rather than hidden in a baseline: the lint rule
+     * says this permission needs a Play-acceptable use case, and Grom is not
+     * distributed through Play (it is installed by hand, `docs/PROVISION.md`).
+     * A foreground server that Android freezes is exactly the use case the
+     * exemption exists for, and the request is one tap in the platform's dialog,
+     * not a silent write.
+     */
+    @android.annotation.SuppressLint("BatteryLife")
+    private fun confirmBatteryExemption() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.doctor_optimise_title)
+            .setMessage(R.string.doctor_optimise_body)
+            .setNegativeButton(R.string.doctor_optimise_cancel, null)
+            .setPositiveButton(R.string.doctor_optimise_continue) { _, _ ->
+                try {
+                    startActivity(
+                        Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            .setData(Uri.parse("package:$packageName"))
+                    )
+                } catch (failure: Exception) {
+                    // No such dialog on this ROM: fall back to the list, which
+                    // at least lets the operator find Grom by hand.
+                    openSystemSettings(
+                        android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+                    )
+                }
+            }
+            .show()
+    }
 
     private fun renderSsh() {
         if (!::sshList.isInitialized) return
@@ -2922,6 +3253,7 @@ class GromActivity : Activity() {
             renderProjects()
             renderAlerts()
             renderFleet()
+            renderDoctor()
         }
         val dashboard = DashboardModel.build(status)
         renderServing(dashboard)

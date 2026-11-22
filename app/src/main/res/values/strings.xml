@@ -452,4 +452,120 @@ Requested: %4$s</string>
     <string name="fleet_grant_key_required">Paste the reader public key.</string>
     <string name="fleet_granted">Key trusted</string>
     <string name="fleet_inbound_only">Only calls in · no address on this device</string>
+
+    <!-- Doctor (D80-D84). Every sentence lives here; the model only supplies
+         measured values and stable level words. -->
+    <string name="ui_doctor">Doctor</string>
+    <string name="menu_doctor_sub">Why Android may be stopping the server</string>
+    <string name="doctor_hint">Your phone measures, you decide. Grom changes nothing here: it reports what Android answered and opens the settings page you need. A grey row means this phone did not answer — not that it is fine.</string>
+    <string name="doctor_verdict_pass">All measured checks pass</string>
+    <string name="doctor_verdict_attention">Some checks need attention</string>
+    <string name="doctor_verdict_partly_unknown">Partly unknown</string>
+    <string name="doctor_verdict_nothing_measured">Nothing measured yet</string>
+    <string name="doctor_verdict_unavailable">Not measured</string>
+    <string name="doctor_level_ok">OK</string>
+    <string name="doctor_level_bad">needs attention</string>
+    <string name="doctor_level_notice">notice</string>
+    <string name="doctor_level_unknown">unknown</string>
+    <string name="doctor_refresh">Measure again</string>
+    <string name="doctor_copy">Copy diagnostics</string>
+    <string name="doctor_copied">Diagnostics copied</string>
+    <string name="doctor_measured_at">measured %1$s</string>
+    <!-- Plurals, not a plain count string: the count is shown next to a word, which is
+         exactly the shape that needs a per-locale form (lint PluralsCandidate). -->
+    <plurals name="doctor_measured_at_attention">
+        <item quantity="one">measured %1$s · %2$d check needs attention</item>
+        <item quantity="other">measured %1$s · %2$d checks need attention</item>
+    </plurals>
+    <plurals name="doctor_measured_at_unknown">
+        <item quantity="one">measured %1$s · %2$d unknown result</item>
+        <item quantity="other">measured %1$s · %2$d unknown results</item>
+    </plurals>
+    <string name="doctor_not_running">The server is not running, so Grom reports only what this phone can tell without it.</string>
+    <string name="doctor_section_now">Right now</string>
+    <string name="doctor_section_checks">Checks</string>
+    <string name="doctor_section_limits">What Grom cannot see from here</string>
+    <string name="doctor_section_actions">Actions</string>
+    <string name="doctor_limits_body">Android does not let an app read the Doze whitelist, the phantom-process limit or a vendor\'s auto-start list. Those are the questions only your computer can answer, so Grom shows you the commands and you run them. It never runs them for you.</string>
+    <string name="doctor_adb_commands">adb shell dumpsys deviceidle whitelist\nadb shell cmd appops get %1$s RUN_ANY_IN_BACKGROUND\nadb shell device_config get activity_manager max_phantom_processes\nadb shell settings get global settings_enable_monitor_phantom_procs\nadb shell settings get global wifi_sleep_policy</string>
+    <string name="doctor_copy_adb">Copy adb commands</string>
+    <string name="doctor_adb_copied">Commands copied</string>
+    <string name="doctor_open_battery">Battery settings</string>
+    <string name="doctor_open_app">App settings</string>
+    <string name="doctor_open_notifications">Notification settings</string>
+    <string name="doctor_open_battery_exempt">Ask to stop optimising</string>
+    <string name="doctor_open_failed">This phone has no settings page for that</string>
+    <string name="doctor_optimise_title">Stop optimising Grom?</string>
+    <string name="doctor_optimise_body">Android will ask you to allow Grom to run without battery optimisation. That is the single biggest reason a phone stops its server, and the only change this screen can request.</string>
+    <string name="doctor_optimise_continue">Continue</string>
+    <string name="doctor_optimise_cancel">Cancel</string>
+    <string name="doctor_unavailable">Doctor is available only in the server role.</string>
+
+    <string name="doctor_check_process">Server process</string>
+    <string name="doctor_check_exit">Last exit</string>
+    <string name="doctor_check_battery">Battery optimisation</string>
+    <string name="doctor_check_background">Background restriction</string>
+    <string name="doctor_check_standby">App standby bucket</string>
+    <string name="doctor_check_notifications">Notifications</string>
+    <string name="doctor_check_agent">Agent stability</string>
+    <string name="doctor_check_data_plane">Public API</string>
+    <string name="doctor_check_bridge">SSH bridge</string>
+    <string name="doctor_check_storage">Free space</string>
+    <string name="doctor_check_unknown">Check</string>
+
+    <string name="doctor_code_process_stopped">the server is stopped</string>
+    <string name="doctor_code_process_unclean">the previous run ended without a clean stop</string>
+    <string name="doctor_code_process_quarantined">the agent was quarantined after repeated crashes</string>
+    <string name="doctor_code_process_no_runtime">the Node runtime is not installed</string>
+    <string name="doctor_code_process_starting">starting</string>
+    <string name="doctor_code_process_not_running">no status from the server</string>
+    <string name="doctor_code_exit_low_memory">Android ran out of memory and killed the process</string>
+    <string name="doctor_code_exit_signaled">the process was signalled</string>
+    <string name="doctor_code_exit_anr">Android stopped it because it was not responding</string>
+    <string name="doctor_code_exit_crash">the process crashed</string>
+    <string name="doctor_code_exit_excessive">Android judged it to use too many resources</string>
+    <string name="doctor_code_exit_freezer">Android froze it as a cached process</string>
+    <string name="doctor_code_exit_user_stopped">you stopped it</string>
+    <string name="doctor_code_exit_self">it stopped itself</string>
+    <string name="doctor_code_exit_user_requested">you asked it to stop</string>
+    <string name="doctor_code_exit_updated">the app was updated</string>
+    <string name="doctor_code_exit_unrecorded">the marker saw an end without a clean stop, but this Android does not say why</string>
+    <string name="doctor_code_exit_not_available">this Android version does not record exit reasons</string>
+    <string name="doctor_code_exit_none">no exit has been recorded since the last clean start</string>
+    <string name="doctor_code_exit_other">Android gave no reason</string>
+    <string name="doctor_code_battery_optimised">Android may still put Grom to sleep</string>
+    <string name="doctor_code_battery_unknown">this phone did not answer</string>
+    <string name="doctor_code_background_restricted">background work is restricted for Grom</string>
+    <string name="doctor_code_background_unknown">this phone did not answer</string>
+    <string name="doctor_code_standby_unknown">this phone did not answer</string>
+    <string name="doctor_code_standby_exempted">exempt from standby</string>
+    <string name="doctor_code_standby_active">active</string>
+    <string name="doctor_code_standby_working_set">working set</string>
+    <string name="doctor_code_standby_frequent">frequent — background work is throttled</string>
+    <string name="doctor_code_standby_rare">rare — Android is throttling Grom</string>
+    <string name="doctor_code_standby_restricted">restricted by the system</string>
+    <string name="doctor_code_standby_never">never — Grom gets no background time</string>
+    <string name="doctor_code_notifications_off">the running notification is hidden</string>
+    <string name="doctor_code_notifications_unknown">this phone did not answer</string>
+    <string name="doctor_code_agent_crashing">the agent keeps crashing and will be quarantined</string>
+    <string name="doctor_code_agent_restarted">the agent has restarted at least once</string>
+    <string name="doctor_code_agent_unknown">no status from the server</string>
+    <string name="doctor_code_data_plane_stopped">switched on but not listening</string>
+    <string name="doctor_code_data_plane_off">switched off — most phones do not need it</string>
+    <string name="doctor_code_data_plane_unknown">no status from the server</string>
+    <string name="doctor_code_bridge_down">a server is saved but no tunnel is up</string>
+    <string name="doctor_code_bridge_none">no external server is configured</string>
+    <string name="doctor_code_bridge_unknown">no status from the server</string>
+    <string name="doctor_code_storage_low">under 500 MB free — the runtime has no room</string>
+    <string name="doctor_code_storage_unknown">this phone did not answer</string>
+
+    <string name="doctor_fact_doze">Doze right now</string>
+    <string name="doctor_fact_power_saver">Battery saver</string>
+    <string name="doctor_fact_battery">Battery</string>
+    <string name="doctor_fact_thermal">Thermal status</string>
+    <string name="doctor_fact_network">Network</string>
+    <string name="doctor_fact_storage">Free space</string>
+    <string name="doctor_fact_memory">Memory</string>
+    <string name="doctor_fact_android">Android API</string>
+    <string name="doctor_fact_unexpected_stops">Unexpected stops</string>
 </resources>

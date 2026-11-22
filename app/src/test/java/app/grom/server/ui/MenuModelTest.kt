@@ -13,7 +13,8 @@ import java.io.File
  * The header menu (D68).
  *
  * The dashboard keeps Start/Stop, the state headline and the "Now serving"
- * lamps; everything else opens from the menu. These tests pin the order (a
+ * lamps; everything else opens from the menu, including the Doctor that explains
+ * a phone which keeps stopping the server (D80). These tests pin the order (a
  * product decision, not a refactor), make sure a section can never be listed
  * twice, and — like [HelpModelTest] — check that every entry points at strings
  * that really exist.
@@ -31,6 +32,7 @@ class MenuModelTest {
                 MenuModel.KEY_ALERTS,
                 MenuModel.KEY_ACCESS,
                 MenuModel.KEY_RUNTIME,
+                MenuModel.KEY_DOCTOR,
                 MenuModel.KEY_UPDATE,
                 MenuModel.KEY_INVITE,
                 MenuModel.KEY_HELP
@@ -84,7 +86,7 @@ class MenuModelTest {
             "ui_menu", "ui_menu_sections", "ui_close",
             "menu_ssh_sub", "menu_fleet_sub", "menu_nostr_sub", "menu_projects_sub",
             "menu_alerts_sub", "menu_access_sub", "menu_runtime_sub",
-            "menu_update_sub", "menu_invite_sub", "menu_help_sub"
+            "menu_doctor_sub", "menu_update_sub", "menu_invite_sub", "menu_help_sub"
         ).forEach { name ->
             assertTrue("missing string: $name", names.contains(name))
         }
@@ -101,6 +103,7 @@ class MenuModelTest {
         assertEquals(R.string.ui_alerts, MenuModel.titleFor(MenuModel.KEY_ALERTS))
         assertEquals(R.string.ui_public_access, MenuModel.titleFor(MenuModel.KEY_ACCESS))
         assertEquals(R.string.ui_runtime_section, MenuModel.titleFor(MenuModel.KEY_RUNTIME))
+        assertEquals(R.string.ui_doctor, MenuModel.titleFor(MenuModel.KEY_DOCTOR))
         assertEquals(R.string.ui_update, MenuModel.titleFor(MenuModel.KEY_UPDATE))
         assertEquals(R.string.invite_label, MenuModel.titleFor(MenuModel.KEY_INVITE))
         assertEquals(R.string.ui_help, MenuModel.titleFor(MenuModel.KEY_HELP))
