@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# grom-provision — prepare several phones for Grom from one computer.
+#
+# Phase (a) of the fleet work (docs/PROVISION.md, D79): this tool drives `adb`
+# from the machine with the USB cables. It never touches the Grom tree, it
+# adds nothing to the APK, and it needs only a JDK 17 plus `adb`, so it runs as
+# a single-file Java program without a build step.
+#
+# The tool only reads, installs the APK you pass, and asks for a battery
+# exemption. It never removes packages, wipes data or restarts a phone.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  JAVA="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+  JAVA="java"
+else
+  echo "grom-provision: a JDK 17 is required (set JAVA_HOME or put java on PATH)" >&2
+  exit 2
+fi
+
+exec "$JAVA" --source 17 "$here/provision/GromProvision.java" "$@"

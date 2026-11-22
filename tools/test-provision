@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# test-provision — tests for tools/grom-provision.
+#
+# The suite needs no phone: every case runs the real tool against a fake adb
+# that answers from a scenario directory and records each invocation, so the
+# tests can prove both what the tool decided and that it never ran a command
+# that could destroy a phone's state.
+set -euo pipefail
+
+cd "$(dirname "$0")/.." || exit 1
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  JAVA="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+  JAVA="java"
+else
+  echo "test-provision: a JDK 17 is required (set JAVA_HOME or put java on PATH)" >&2
+  exit 2
+fi
+
+echo "== test-provision =="
+exec "$JAVA" --source 17 tools/provision/GromProvision.java --self-test
