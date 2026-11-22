@@ -3,10 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D67 and S1-R002…S1-R012,
-# S5-R001…S5-R044.
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D75 and S1-R002…S1-R043,
+# S5-R001…S5-R049.
 #
-# The gate is intentionally a fixed count: "33/33" is the number of passes.
+# The gate is intentionally a fixed count: "37/37" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -94,9 +94,9 @@ check "boot restart is opt-in" \
 check "boot respects quarantine" \
   grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
 
-# 15. every IPC transaction checks signatures (API 4 has 22 transactions)
+# 15. every IPC transaction checks signatures (API 6 has 35 transactions)
 check "every IPC transaction applies the signature gate" \
-  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 22 ]"
+  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 35 ]"
 
 # 16. cleartext outbound traffic is not enabled
 check "no usesCleartextTraffic" \
@@ -190,6 +190,29 @@ check "notification delivery has no scheduler and one retry site" \
 #     identifies the operator, so it is device state, not status.
 check "notification token is sealed and absent from the public projection" \
   bash -c "grep -q 'secretBox\.seal(' $MAIN/notify/NotifySettingsStore.kt && grep -q 'secretBox\.open(' $MAIN/notify/NotifySettingsStore.kt && ! grep -q 'tokenSealed' $MAIN/notify/NotifyStatus.kt && ! grep -q 'chatId' $MAIN/notify/NotifyStatus.kt"
+
+
+# 34. the fleet client reaches the network only through the shared transport
+#     (D75). A socket symbol here would be a second, unaudited way out.
+check "fleet client holds no socket symbol" \
+  bash -c "! grep -rnE '\bSocket\s*\(|HttpURLConnection|openConnection|okhttp|java\.net\.URL' $MAIN/cluster --include='*.kt'"
+
+# 35. the identity seed reaches the disk only through the Keystore box (D72),
+#     and the public projections never name it. `FleetStatus` is the only fleet
+#     block that leaves the device, so it must not carry key material.
+check "identity seed is sealed and absent from public documents" \
+  bash -c "grep -q 'secretBox\.seal(' $MAIN/cluster/NodeIdentity.kt && ! grep -qE 'seed|privateKey' $MAIN/cluster/FleetStatus.kt $MAIN/superserver/ConfigExport.kt $MAIN/superserver/SuperStatusDocument.kt"
+
+# 36. pairing is explicit and bounded (D71): a constant-time code compare, a
+#     session TTL, a capped number of attempts, and no path that opens a
+#     session except the operator action.
+check "pairing is constant-time, bounded and explicitly opened" \
+  bash -c "grep -q 'MessageDigest.isEqual' $MAIN/cluster/Pairing.kt && grep -q 'SESSION_TTL_MS' $MAIN/cluster/Pairing.kt && grep -q 'MAX_ATTEMPTS' $MAIN/cluster/Pairing.kt && grep -q 'fun open()' $MAIN/cluster/Pairing.kt"
+
+# 37. peer access is scoped (D73), health is answered before any credential
+#     work, and the fleet status block names no address (D59).
+check "peers are scoped and no address reaches status" \
+  bash -c "grep -q 'SCOPE_REQUIRED' $MAIN/superserver/SuperRouter.kt && grep -q 'hasScope' $MAIN/superserver/SuperRouter.kt && ! grep -q '\"address\"' $MAIN/cluster/FleetStatus.kt && awk '/path == HEALTH/{h=NR} /auth\.authenticate/{a=NR} END{exit !(h>0 && a>h)}' $MAIN/superserver/SuperRouter.kt"
 
 echo
 TOTAL=$((PASS + FAIL))
