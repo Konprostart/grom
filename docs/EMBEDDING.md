@@ -99,7 +99,7 @@ missing. Ask the server for the truth:
 ```kotlin
 val client = GromEmbed.newClient(context)   // Target.EMBEDDED
 client.bind(object : GromClient.Listener {
-    override fun onConnected(apiVersion: Int) { /* apiVersion == 5 */ }
+    override fun onConnected(apiVersion: Int) { /* apiVersion == 6 */ }
     override fun onDisconnected(reason: String) { /* show the reason */ }
 })
 val status = client.call(null) { it.statusJson() }
@@ -124,7 +124,7 @@ disk.
 
 ---
 
-## 4. The IPC surface (API 4 and 5)
+## 4. The IPC surface (API 4, 5 and 6)
 
 | Method | Purpose |
 |---|---|
@@ -137,6 +137,7 @@ disk.
 | `sshStatusJson()` … `sshClearPin(id)` | the operator's SSH bridge (D58) |
 | `lightningProbeJson()` | run the Lightning `health` op now |
 | `notifySettingsJson()` … `notifyTestJson()` | **API 5**: the operator's Telegram alerts (D65) |
+| `nodeIdentityJson()` … `peerRefreshJson()` | **API 6**: the device identity, mutual pairing and the paired-device roster (D70–D75) |
 
 Every method runs the same per-transaction signature check as API 1 and 2. A
 foreign certificate still never reaches the server state.

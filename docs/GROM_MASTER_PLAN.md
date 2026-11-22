@@ -1556,10 +1556,15 @@ Numbered, file-level, in dependency order. "Gate" names the check that proves it
 
 ### U.4 Phase 4 — multi-device
 
+> **Phase B is delivered ahead of Phase 4** as Phase 1F (D70–D75): T-27 and
+> T-28 are implemented, plus the scoped peer client and the Devices section.
+> Deliberately **not** implemented: discovery, a heartbeat endpoint, placement
+> and a hub. Those stay here.
+
 | # | task | files | gate |
 |---|---|---|---|
-| T-27 | node identity: generate, seal, export public, derive `nodeId` | `cluster/NodeIdentity.kt` | `NodeIdentityTest` |
-| T-28 | pairing: code, challenge, approval, scopes, revocation | `cluster/Pairing.kt` | `PairingTest` |
+| T-27 | node identity: generate, seal, export public, derive `nodeId` | `cluster/NodeIdentity.kt` | `NodeIdentityStoreTest` |
+| T-28 | pairing: code, challenge, approval, scopes, revocation | `cluster/Pairing.kt` | `PairingTest`, `FleetServiceTest` |
 | T-29 | registry: schema, upsert, staleness, cached view | `cluster/NodeRegistry.kt` | `NodeRegistryTest` |
 | T-30 | heartbeat endpoint and verifier | `superserver/SuperRouter.kt` | `HeartbeatTest` (stale timestamp, bad signature) |
 | T-31 | CLI: status, apps, deploy, rollback, logs, nodes, audit | `cli/` (no listener) | `tools/test-cli` against a live loopback server |

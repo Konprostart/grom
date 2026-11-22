@@ -1029,3 +1029,118 @@ now simply absent.
 titles and subtitles exist), `HelpModelTest` (unchanged content rules),
 `tools/run-gates` (9/9, lint 0/0).
 
+
+## D70 — multi-device is a pairing graph, not an account
+**ACCEPTED.** There is no cloud account, no directory service, no shared
+private key and no escrow. Every device has its **own** Ed25519 identity; the
+"one operator" is the set of devices the operator has explicitly paired, held in
+a local file on each of them.
+
+A pairing is a mutual relationship, not a login: nothing is registered anywhere,
+nothing is recovered from a server, and losing a device does not revoke it
+remotely. That cost is the point — Grom stays usable with no account (S1-R004)
+and there is no provider that can observe the fleet.
+
+*Why:* an account would make the fleet depend on a service Grom does not own,
+and one shared key across ten phones would mean one stolen phone compromises
+all of them.
+
+*Enforced by:* `NodeIdentity`/`NodeIdentityStore` (one key per device),
+`PeerStore` (the local graph), `FleetServiceTest`, `NodeIdentityStoreTest`.
+
+## D71 — pairing is mutual and explicit, never automatic
+**ACCEPTED.** A pairing succeeds only when all of the following hold:
+
+1. the device that shows the code has an **open session** (operator action,
+   5-minute TTL, one at a time);
+2. the joining device proves possession of its key by signing the
+   `grom-pair-hello-v1` transcript, which binds the code hash to its node id;
+3. the code hash matches — compared with `MessageDigest.isEqual`, with at most
+   5 attempts before the session closes;
+4. the operator on the showing device approves **and** chooses a non-empty
+   subset of the requested scopes;
+5. the joining operator compares the fingerprint on both screens and confirms;
+6. the acceptance is signed (`grom-pair-accept-v1`) and verified with the
+   showing device's key.
+
+Knowing a code, or a node id, is never sufficient. Nothing is stored before both
+confirmations; a rejection or an expiry stores nothing.
+
+*Why:* the alternative — "first device to claim wins" — would let anyone on the
+same LAN pair silently with a device whose public API is on.
+
+*Enforced by:* `PairingTest` (signature, code binding, attempts, expiry, self,
+forged hello, scope subset), `ClusterRouterTest` (pre-auth route, closed
+session), `tools/test-policy` #36.
+
+## D72 — the identity seed is sealed and cannot be recovered
+**ACCEPTED.** The 32-byte seed exists only inside `NodeIdentityStore` and only
+as Android Keystore ciphertext on disk (`seedSealed`). It is never returned by
+any API, never written to status/export/audit and never logged. There is no
+escrow and no backup.
+
+A file that fails verification (`nodeId` must equal `Ed25519.keyId(publicKey)`,
+and the seed must derive that same public key) is reported as
+`IDENTITY_CORRUPT` and is **not** replaced. Recovery is the explicit
+`nodeResetIdentityJson("RESET")` action, which mints a new key and forgets every
+pairing.
+
+*Why:* silently minting a new identity would break every pairing on every other
+device without the operator noticing.
+
+*Enforced by:* `NodeIdentityStoreTest` (tamper, resealed seed, over-size,
+reset), `tools/test-policy` #35.
+
+## D73 — peer access is scoped; grants are symmetric in this phase
+**ACCEPTED.** Two scopes exist: `status.read` (`GET /v1/status`) and
+`config.read` (`GET /v1/config`, the sanitised export). A paired device is a
+`Principal.Peer` with exactly the scopes granted during pairing; everything else
+— the operator's session, the operator's keys, an unpaired key — is
+`Principal.Operator` and keeps the previous behaviour.
+
+In this phase the grant is symmetric: each side grants the other the same set,
+and both operators see it before ordering. Revocation is deleting the row and
+takes effect on the next request, because the key lookup reads the store live
+(no listener restart).
+
+*Why:* an all-or-nothing peer would hand another phone the whole configuration
+just to check whether it is alive.
+
+*Enforced by:* `SuperAuthPrincipalTest`, `ClusterRouterTest`
+(`status.read` passes, `config.read`/plugins return `403 SCOPE_REQUIRED`),
+`tools/test-policy` #37.
+
+## D74 — peer state is measured on request, never scheduled
+**ACCEPTED.** A peer row starts at `unknown`. A successful signed
+`GET /v1/status` within 90 s of the probe is `alive`; an older success is
+`stale`; a failed probe is `unreachable` with a stable code. Pairing itself
+never makes a lamp green.
+
+Probes run only when the operator opens the Devices section or taps Refresh
+(at most 16 peers per run). The engine schedules no background polling, so a
+sleeping phone does not pretend to watch the fleet.
+
+*Why:* "configured" is not "reachable", and a background poll would drain a
+battery to produce a status the operator is not looking at.
+
+*Enforced by:* `FleetServiceTest`, `PeerClientTest`, `PeerStoreTest`,
+`FleetModelTest`, `tools/test-policy` #34/#37.
+
+## D75 — the peer client is the fifth outbound case
+**ACCEPTED.** `S1-R003` gains a fifth case: a signed request to a **paired
+device**, at an address the operator typed during pairing and that is stored in
+`PeerStore`. No host is compiled in; the client uses the shared `JsonTransport`
+and holds no socket symbol of its own. It is never started by Grom — only by an
+explicit `peerJoinJson` or `peerRefreshJson`.
+
+This amends the outbound list in S1-R003 and the socket allow-list in
+`tools/test-policy` #27 (now `cluster/` would be refused, and #34 asserts it
+contains no socket instead). Pairing itself is a short-lived pre-auth surface on
+the existing listener, reachable only while a session is open.
+
+*Why:* a fleet that cannot ask another phone whether it is alive is a list, not
+a fleet. Restricting the target to the paired, operator-entered address keeps
+the "no host compiled in" property that makes the outbound list auditable.
+
+*Enforced by:* `PeerClientTest`, `ClusterRouterTest`, `tools/test-policy`
+#17/#27/#34, and `docs/CLUSTER.md` §5.

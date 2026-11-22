@@ -289,3 +289,51 @@ resending the secret.
 `{"ok":true}`. It MUST bypass the queue and the rate limit (the operator asked
 in that moment) and MUST NOT alter the event table. Every API 5 method MUST pass
 the same per-transaction signature gate (S4-R007).
+
+## 11. API 6 — device identity and the fleet (D70–D75)
+
+`apiVersion()` returns `6`. API 6 is additive: every API 1–5 method is
+unchanged. It adds:
+
+```aidl
+String nodeIdentityJson();
+String nodeResetIdentityJson(String confirmation);
+String peersJson();
+String peerPairStartJson();
+String peerPairPendingJson();
+String peerPairCompleteJson(String decisionJson);
+String peerJoinJson(String requestJson);
+String peerConfirmJson(String confirmJson);
+void   peerRemove(String nodeId);
+String peerRefreshJson();
+```
+
+### S4-R045 (API 6)
+`nodeIdentityJson()` MUST return `{nodeId, publicKey, label, fingerprint,
+createdAtMs}` and MUST NOT return the private seed or any value from which it can
+be reconstructed. `nodeResetIdentityJson(confirmation)` MUST refuse any
+confirmation other than `RESET` with `RESET_CONFIRMATION_REQUIRED`, and on
+success MUST forget every paired device.
+
+### S4-R046 (API 6)
+`peersJson()` is the only projection that may carry a peer address, because the
+caller already passed the per-transaction signature gate. It MUST return the
+measured `state` (`unknown`, `alive`, `stale`, `unreachable`) and MUST NOT return
+a secret.
+
+### S4-R047 (API 6)
+Pairing is three operator steps and no shortcut:
+`peerPairStartJson()` opens a session and returns `{code, expiresAtMs, nodeId,
+fingerprint}`; `peerPairPendingJson()` returns the waiting device (or nothing);
+`peerPairCompleteJson({accept, scopes})` approves a non-empty subset of the
+requested scopes or rejects. A scope that was not requested MUST be refused with
+`BAD_SCOPE`.
+
+### S4-R048 (API 6)
+`peerJoinJson({address, code})` MUST validate the address and code locally,
+verify the other device's acceptance signature over
+`grom-pair-accept-v1`, and return an **unconfirmed** offer; nothing is written
+until `peerConfirmJson({nodeId})`. `peerRefreshJson()` performs at most one
+measured probe per paired device (clamped to 16 per call) and MUST NOT schedule
+any future probe. `peerRemove(nodeId)` takes effect on the next request. Every
+API 6 method MUST pass the same per-transaction signature gate (S4-R007).

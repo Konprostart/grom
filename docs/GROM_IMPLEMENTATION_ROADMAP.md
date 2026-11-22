@@ -15,14 +15,15 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1C — embeddable engine, dashboard, SSH bridge** | **done** | `engine/` library, `GromEmbed`, API 3, `projects/`, `ssh/`, `DashboardModel`, sections UI; D55–D60 |
 | **1D — integration ergonomics** | **done** | `ProjectNamespace` + API 4 `projectExec` (D61), `GromProject`, real heartbeat in `GromEmbed`, "How Grom works" section (D62), external Lightning node reference (D63), unlimited saved SSH servers (D64) |
 | **1E — fleet view (Phase A)** | **done** | `tools/grom-fleet` + `tools/fleet/`, read-only over the existing public data plane; `docs/FLEET.md`; `tools/test-fleet` |
+| **1F — identity, pairing, fleet (Phase B)** | **done (code)** | `engine/.../cluster/`, API 6, scoped peers, Devices section; `docs/CLUSTER.md`; D70–D75 |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
-| **4 — multi-device** | blocked by 3 | `cluster/` |
+| **4 — multi-device** | blocked by 3 | `cluster/` — identity/pairing already delivered as 1F; hub, placement and discovery remain |
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.10.0` (versionCode 10). The ten gates in `tools/run-gates` are
+Current version: `0.11.0` (versionCode 11). The ten gates in `tools/run-gates` are
 the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
@@ -434,6 +435,26 @@ Not closed by this phase: nothing has been run against a physical phone from
 this repository (B2). The first real run is the operator's, with their own
 credentials.
 
-Next (needs its own decision before code): **Phase B — a per-device Ed25519
-identity, pairing and a paired peer roster**, which introduces the first
-device-to-device outbound relationship and therefore an amendment to S1-R003.
+### Phase 1F — device identity, pairing and fleet, Phase B — **done (code)**
+
+| file | what it is |
+|---|---|
+| `engine/.../cluster/NodeIdentity.kt` | one Ed25519 key per device, sealed seed, corrupt-file refusal |
+| `engine/.../cluster/PeerRecord.kt` | scopes, paired record, measured state, address validation |
+| `engine/.../cluster/PeerStore.kt` | atomic JSON, size cap, revoke |
+| `engine/.../cluster/Pairing.kt` | one-time code, signed hello/accept, operator decision |
+| `engine/.../cluster/PeerClient.kt` | signed `GET /v1/status` over the shared transport |
+| `engine/.../cluster/FleetService.kt` | join, confirm, refresh, reset |
+| `engine/.../cluster/FleetStatus.kt` | `{nodeId,label}` only |
+| `superserver/SuperAuth.kt`, `SuperRouter.kt` | principals, `SCOPE_REQUIRED`, `/v1/config`, pairing routes |
+| `app/.../ui/FleetModel.kt`, `GromActivity.kt` | measured lamps, pairing dialogs, refresh |
+| `docs/CLUSTER.md` | the operator guide and the security model |
+
+Gate: `tools/run-gates` **10/10**, policy **37/37**, both flavours green, lint
+0/0. Pairing, the scope matrix and the seeded-seed rule are also pinned by
+`tools/test-policy` #34–#37.
+
+Not closed by this phase: nothing has been run against a physical phone (B2),
+there is no TLS (D47), no global revoke, and pairwise pairing does not scale
+beyond a handful of devices. **Phase C (VPS hub)** is the answer for many phones
+behind CGNAT and needs its own decision.

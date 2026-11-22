@@ -58,6 +58,8 @@ second process (D58).
 | Dashboard lamps | **delivered** — pure `DashboardModel`, green only for measured values |
 | SSH bridge | **delivered in code** — TOFU pin, `tcpip-forward` only, one-destination filter, sealed credentials; proven against a real SSH server in JVM tests |
 | SSH bridge on a device | **open** — never run on hardware, like the rest of the server |
+| Devices (identity, pairing, fleet) | **delivered in code** — one Ed25519 key per phone, mutual pairing with fingerprints, scoped peers, measured lamps (D70–D75) |
+| Devices on a device | **open** — pairing has never been exercised between two physical phones |
 
 When the runtime is genuinely absent, the app reports `MISSING_RUNTIME` and the
 agent endpoints answer `503` naming the missing file. That is the designed
@@ -195,6 +197,25 @@ request locally with an Ed25519 key the phone never receives.
 
 Full setup, the config schema and the security notes: **`docs/FLEET.md`**.
 
+## Devices (pair your other phones)
+
+The app can pair with your other devices without any account. Every phone has
+its **own** Ed25519 key (the seed is sealed with the Android Keystore); pairing
+is mutual, and both screens must show the same fingerprint before anything is
+stored. A paired device may read `/v1/status` and, if granted, the sanitised
+config — nothing else.
+
+Open **Menu → Devices**. The list has a lamp per device: green only after a
+**measured** signed request succeeds, red when the last probe failed, grey when
+there is no measurement. Probes run when you open the screen or tap Refresh;
+Grom does not poll in the background.
+
+The honest limits: Grom signs its traffic but does not encrypt it (D47), there
+is no global revoke because there is no account, and pairwise pairing does not
+scale past a handful of devices — a hub on a VPS is the next phase.
+
+Full guide: **`docs/CLUSTER.md`**.
+
 ## Embedding Grom in your app
 
 Grom is a library first and an app second. An application that depends on
@@ -221,7 +242,7 @@ when (val write = project.put("theme", "dark")) {
 
 That namespace (`p:<projectId>:<key>`, API 4 `projectExec`) is an ownership gate
 on the API, not a sandbox between apps in the same UID. See
-[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the IPC surface (API 4 and 5), the
+[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the IPC surface (API 4, 5 and 6), the
 runtime requirement and the trust-boundary cost.
 
 ## How Grom works

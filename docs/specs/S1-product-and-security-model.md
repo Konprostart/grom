@@ -30,7 +30,7 @@ balance, no account, no settlement, no payment credential.
 ### S1-R003
 Grom MUST NOT initiate an outbound connection to the internet on its own. There
 is no telemetry, analytics or crash reporting. Outbound connections are limited
-to four explicit, operator-initiated cases:
+to five explicit, operator-initiated cases:
 
 1. the update check (S1-R033): one HTTPS GET to the public release feed, only
    after the operator asks for it;
@@ -42,7 +42,11 @@ to four explicit, operator-initiated cases:
    only the local data plane as a destination;
 4. the operator-enabled notification delivery (D65, S1-R038): one HTTPS POST to
    the single notification host, using a bot token the operator entered at
-   runtime and a fixed message body.
+   runtime and a fixed message body;
+5. a request to a **paired device** (D75): a signed HTTP request to the address
+   the operator typed during pairing and that is stored in `PeerStore`, made
+   only when the operator joins or refreshes the fleet. No host is compiled in,
+   and the client uses the shared transport (S1-R040).
 
 There is no scheduler, no retry loop and no connection that Grom starts by
 itself. The notification case allows at most one additional attempt per message
@@ -240,3 +244,31 @@ Notification settings MUST NOT affect the data plane, the control plane or the
 agent: enabling, disabling, changing or failing to deliver a message MUST NOT
 change any other subsystem's state. `GET /v1/health` MUST NOT carry notification
 state.
+
+## 14. Multi-device fleet (D70–D75)
+
+### S1-R040
+A device identity MUST be a local Ed25519 key pair. The `nodeId` MUST be derived
+from the public key (`Ed25519.keyId`), never supplied by a caller. The private
+seed MUST be stored only as `SecretBox` ciphertext and MUST NOT appear in any
+API response, status document, export, audit record or log. Grom MUST NOT
+provide an account, a directory, a recovery service or an escrow for it.
+
+### S1-R041
+Pairing MUST be mutual and operator-confirmed on both devices: a short-lived
+single-use code, a signature over a domain-separated transcript, a
+constant-time code comparison with a bounded number of attempts, and a
+fingerprint comparison on both screens. No automatic approval path may exist and
+nothing may be stored before both confirmations.
+
+### S1-R042
+A paired device MUST be limited to the scopes granted at pairing
+(`status.read`, `config.read`). A revoked pairing MUST stop verifying on the next
+request. The operator's own session and keys MUST keep their previous,
+unrestricted behaviour unless the host explicitly maps a key to a peer.
+
+### S1-R043
+A paired-device address MUST NOT appear in `GET /v1/status`, in
+`GET /v1/health` or in the sanitised configuration export. It is returned only
+over the signature-gated Binder. `/v1/status` MAY report this device's own
+`nodeId` and `label`; `/v1/health` MUST NOT report either.

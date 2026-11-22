@@ -425,3 +425,33 @@ changing them MUST NOT stop, restart or rebind the listener, and a delivery
 failure MUST NOT change the data plane's reported state. The agent plugin's
 `status` op carries the block through the same `statusExtra` callback; its
 `health` op does not.
+
+### S5-R045
+`/v1/pair/identity`, `/v1/pair/hello` and `/v1/pair/poll` are the only
+pre-authenticated routes besides `/v1/health` and `/v1/auth/login`. They MUST
+answer `PAIR_SESSION_CLOSED` (or `PAIR_UNKNOWN`) whenever no operator session is
+open, and the code comparison MUST be constant-time with a bounded number of
+attempts. They MUST pass the request rate limiter.
+
+### S5-R046
+A paired device MUST be authenticated with the same Ed25519 request signature as
+an operator key and MUST be limited to its granted scopes: `status.read` for
+`GET /v1/status`, `config.read` for `GET /v1/config`. Every other route MUST
+answer `403 SCOPE_REQUIRED` for a peer. `/v1/config` MUST return the sanitised
+`ConfigExport` document and MUST NOT serialise the live configuration.
+
+### S5-R047
+`/v1/status` MUST carry a `fleet` block with this device's `nodeId` and `label`
+only. `GET /v1/health` MUST NOT carry it. A paired-device roster, an address, a
+public key and a scope MUST NOT appear in either document or in the sanitised
+export.
+
+### S5-R048
+Pairing or revoking a device MUST NOT restart the listener, drop a session or
+rebind: the key lookup and the principal mapping read the peer store live
+(extends D54).
+
+### S5-R049
+The public status is a projection, not a state store: `fleet` MUST be built from
+the identity record alone, and the agent plugin's `status` op MUST carry the same
+block through `statusExtra` without adding a peer list.

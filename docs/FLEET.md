@@ -206,12 +206,16 @@ silently.
 
 ## 7. What comes next
 
-Phase A answers "does my network and credential setup work?". The next phases
-each need a written decision first (see the plan):
+Phase A answers "does my network and credential setup work?".
 
-* **Phase B — identity and pairing** — a per-device Ed25519 identity, a paired
-  peer roster, and a `fleet` block in `/v1/status`. Needs a new outbound
-  relationship (device → device) and therefore a `Dxx` amendment to S1-R003.
+**Phase B is now implemented in the app** (D70–D75): a per-device Ed25519
+identity, mutual pairing with fingerprints, scoped access and the measured
+Devices section. The CLI stays useful because it needs nothing installed on a
+phone and works from a laptop. See [`CLUSTER.md`](CLUSTER.md) for the in-app flow
+and the security model.
+
+Remaining phases each need a written decision first:
+
 * **Phase C — VPS hub** — one place that reaches every phone through the
   reverse tunnel that already exists, so control works behind CGNAT.
 * **Phase D — storage catalogue and vault backup** — no merged disk; a
