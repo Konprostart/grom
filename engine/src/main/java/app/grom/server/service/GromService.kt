@@ -318,6 +318,17 @@ class GromService : Service() {
             requireSameSigner()
             return runtime.peerRefreshJson()
         }
+
+        // ------------------------------------------ API 7 (D76-D78, inbound)
+
+        override fun peerGrantJson(json: String?): String {
+            requireSameSigner()
+            return try {
+                runtime.peerGrantJson(json.orEmpty())
+            } catch (failure: ApiException) {
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
+        }
     }
 
     /**

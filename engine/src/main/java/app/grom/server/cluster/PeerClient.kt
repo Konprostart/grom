@@ -78,6 +78,9 @@ class PeerClient(
      * looks different and is never silently trusted.
      */
     fun probe(peer: PeerRecord, seed: ByteArray): Probe {
+        // A one-way grant has no address to call; opening a connection anyway
+        // would be inventing one (D77).
+        if (peer.isInboundOnly()) return Probe.Failed("PEER_NO_ADDRESS")
         val response = try {
             signedGet(peer.address, STATUS_PATH, seed)
         } catch (_: TransportException) {

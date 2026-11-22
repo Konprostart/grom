@@ -45,6 +45,11 @@ enum class PeerScope(val wireName: String) {
  * never where it lives (D59). The Binder may return it because the caller is
  * already signature-gated and the operator typed it.
  *
+ * An empty [address] is a *one-way grant* (D77): the operator trusted a key that
+ * only ever calls in, such as a hub on their VPS. Such a record is never
+ * dialled — there is nowhere to dial — and its state stays `unknown` until the
+ * other side is seen by other means.
+ *
  * Liveness is measured, never derived: [lastProbeOk] starts as `null` (never
  * checked) and only a completed probe sets it. Pairing alone proves nothing
  * about reachability, so it can never make a lamp green.
@@ -53,7 +58,7 @@ data class PeerRecord(
     val nodeId: String,
     val publicKey: String,
     val label: String,
-    val address: String,
+    val address: String = "",
     /** What *this* device allows the peer to read. */
     val grantedByMe: Set<PeerScope>,
     /** What the peer allows this device to read. */
@@ -78,6 +83,13 @@ data class PeerRecord(
 
     fun fingerprint(): String = NodeIdentity.formatFingerprint(nodeId)
 
+    /**
+     * True when this record is a one-way grant: the key may call in, but this
+     * device has no address to call out to (D77). A probe must never open a
+     * connection for such a record.
+     */
+    fun isInboundOnly(): Boolean = address.isEmpty()
+
     fun toJson(nowMs: Long, includeAddress: Boolean = false): Map<String, Any?> =
         linkedMapOf<String, Any?>(
             "nodeId" to nodeId,
@@ -93,8 +105,9 @@ data class PeerRecord(
             "state" to state(nowMs)
         ).apply {
             // The address is device state, not status: only the operator-facing
-            // Binder projection carries it (D59).
-            if (includeAddress) put("address", address)
+            // Binder projection carries it (D59). A one-way grant has none, so
+            // the field is omitted rather than sent empty.
+            if (includeAddress && address.isNotEmpty()) put("address", address)
         }
 
     companion object {
@@ -111,7 +124,9 @@ data class PeerRecord(
             val nodeId = raw["nodeId"] as? String ?: return null
             val publicKey = raw["publicKey"] as? String ?: return null
             val label = NodeIdentity.normalizeLabel(raw["label"] as? String)
-            val address = raw["address"] as? String ?: return null
+            // Absent means a one-way grant (D77); a present value must already be
+            // canonical, exactly as the pairing path stores it.
+            val address = (raw["address"] as? String).orEmpty()
             val byMe = PeerScope.fromJson(raw["grantedByMe"]) ?: return null
             val byPeer = PeerScope.fromJson(raw["grantedByPeer"]) ?: return null
             val pairedAt = (raw["pairedAtMs"] as? Number)?.toLong() ?: 0L
@@ -155,7 +170,7 @@ object NodeIdentityRules {
         if (keyBytes.size != Ed25519.PUBLIC_KEY_BYTES) return null
         if (Ed25519.keyId(keyBytes) != nodeId) return null
         if (label.isEmpty() || label.length > NodeIdentity.MAX_LABEL_CHARS) return null
-        if (PeerAddress.normalize(address) != address) return null
+        if (address.isNotEmpty() && PeerAddress.normalize(address) != address) return null
         if (byMe.isEmpty()) return null
         return PeerRecord(
             nodeId = nodeId,

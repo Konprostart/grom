@@ -4,7 +4,9 @@ package app.grom.server.cluster
 import app.grom.server.http.ApiException
 import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
+import app.grom.server.superserver.auth.Ed25519
 import java.io.File
+import java.util.Base64
 
 /**
  * Persistent list of paired devices (D70, D74).
@@ -41,12 +43,52 @@ class PeerStore(
         if (!NodeIdentity.NODE_ID_PATTERN.matches(record.nodeId)) {
             throw ApiException(400, "BAD_PEER", "the peer node id is malformed")
         }
-        if (PeerAddress.normalize(record.address) != record.address) {
+        // An empty address is a one-way grant (D77); a present one must be the
+        // canonical `scheme://host:port` the operator entered.
+        if (record.address.isNotEmpty() && PeerAddress.normalize(record.address) != record.address) {
             throw ApiException(400, "BAD_PEER_ADDRESS", "the peer address is not canonical")
         }
         if (record.grantedByMe.isEmpty()) {
             throw ApiException(400, "SCOPE_REQUIRED", "a pairing must grant at least one scope")
         }
+        val records = load().toMutableList()
+        records.removeAll { it.nodeId == record.nodeId }
+        records.add(record)
+        save(records)
+        return record
+    }
+
+    /**
+     * Trusts a key that only calls in (D77): no handshake and no return address.
+     *
+     * This is how a hub on the operator's VPS is admitted. The key id is derived
+     * from the key, never typed, and the caller must still choose at least one
+     * scope — there is no "trust everything" path. The record it creates has an
+     * empty address, so [app.grom.server.cluster.PeerClient] can never dial it.
+     */
+    @Synchronized
+    fun grant(publicKey: String, label: String, scopes: Set<PeerScope>): PeerRecord {
+        if (scopes.isEmpty()) {
+            throw ApiException(400, "SCOPE_REQUIRED", "choose at least one scope")
+        }
+        val keyBytes = runCatching { Base64.getDecoder().decode(publicKey.trim()) }.getOrNull()
+            ?: throw ApiException(400, "BAD_PUBLIC_KEY", "the public key is not base64")
+        if (keyBytes.size != Ed25519.PUBLIC_KEY_BYTES) {
+            throw ApiException(400, "BAD_PUBLIC_KEY", "an Ed25519 public key is 32 bytes")
+        }
+        val nodeId = Ed25519.keyId(keyBytes)
+        val record = NodeIdentityRules.validatePeer(
+            nodeId = nodeId,
+            publicKey = publicKey.trim(),
+            label = NodeIdentity.normalizeLabel(label),
+            address = "",
+            byMe = scopes,
+            byPeer = emptySet(),
+            pairedAt = clock(),
+            lastProbe = 0L,
+            lastOk = null,
+            error = null
+        ) ?: throw ApiException(400, "BAD_PUBLIC_KEY", "the public key could not be used")
         val records = load().toMutableList()
         records.removeAll { it.nodeId == record.nodeId }
         records.add(record)

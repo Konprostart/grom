@@ -285,6 +285,49 @@ class FleetService(
         )
     )
 
+    /**
+     * Trusts a key that only calls in (D77), e.g. a hub on the operator's VPS.
+     *
+     * There is no handshake and no return address: the operator pastes a public
+     * key and picks scopes, and the key id is derived from the key. A key that
+     * promises an id it does not hash to is refused, and so is this device's own
+     * key. It is *not* an operator key: the record's scopes are the only thing
+     * the caller may do (D73).
+     */
+    @Synchronized
+    fun grantJson(body: String): String {
+        val raw = JsonParser.parseObjectOrNull(body)
+            ?: throw ApiException(400, "BAD_GRANT", "body must be a JSON object")
+        val publicKey = (raw["publicKey"] as? String)?.trim().orEmpty()
+        if (publicKey.isEmpty()) {
+            throw ApiException(400, "BAD_PUBLIC_KEY", "paste the reader's Ed25519 public key")
+        }
+        val keyBytes = runCatching { Base64.getDecoder().decode(publicKey) }.getOrNull()
+            ?: throw ApiException(400, "BAD_PUBLIC_KEY", "the public key is not base64")
+        if (keyBytes.size != Ed25519.PUBLIC_KEY_BYTES) {
+            throw ApiException(400, "BAD_PUBLIC_KEY", "an Ed25519 public key is 32 bytes")
+        }
+        val derived = Ed25519.keyId(keyBytes)
+        val claimed = (raw["nodeId"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+        if (claimed != null && claimed != derived) {
+            throw ApiException(400, "BAD_PUBLIC_KEY", "the public key does not match that node id")
+        }
+        if (derived == identity().nodeId) {
+            throw ApiException(400, "PEER_SELF", "that is this device's own key")
+        }
+        val scopes = PeerScope.fromJson(raw["scopes"])
+            ?: throw ApiException(400, "BAD_SCOPE", "scopes must be a list of known names")
+        val label = NodeIdentity.normalizeLabel(raw["label"] as? String, GRANT_LABEL)
+        val record = store.grant(publicKey, label, scopes)
+        audit("peer.grant", "peer=${record.nodeId} scopes=${PeerScope.wireNames(scopes)}")
+        return Json.encode(
+            linkedMapOf(
+                "ok" to true,
+                "peer" to record.toJson(clock(), includeAddress = true)
+            )
+        )
+    }
+
     fun removePeer(nodeId: String) {
         store.remove(nodeId)
         audit("peer.remove", "peer=$nodeId")
@@ -305,7 +348,14 @@ class FleetService(
             )
         var refreshed = 0
         var reachable = 0
+        var inboundOnly = 0
         for (peer in peers) {
+            // A one-way grant has nothing to dial (D77). Recording a failed
+            // probe would turn "never called out" into a red lamp.
+            if (peer.isInboundOnly()) {
+                inboundOnly += 1
+                continue
+            }
             val result = client.probe(peer, seed)
             val ok = result is PeerClient.Probe.Ok
             val code = (result as? PeerClient.Probe.Failed)?.code
@@ -313,12 +363,13 @@ class FleetService(
             refreshed += 1
             if (ok) reachable += 1
         }
-        audit("peer.refresh", "checked=$refreshed reachable=$reachable")
+        audit("peer.refresh", "checked=$refreshed reachable=$reachable inbound=$inboundOnly")
         return Json.encode(
             linkedMapOf(
                 "ok" to true,
                 "refreshed" to refreshed,
                 "reachable" to reachable,
+                "inboundOnly" to inboundOnly,
                 "total" to store.list().size,
                 "peers" to store.list().map { it.toJson(clock(), includeAddress = true) }
             )
@@ -352,5 +403,8 @@ class FleetService(
 
     companion object {
         const val RESET_CONFIRMATION: String = "RESET"
+
+        /** Used when the operator pastes a key without naming the reader. */
+        const val GRANT_LABEL: String = "Trusted reader"
     }
 }

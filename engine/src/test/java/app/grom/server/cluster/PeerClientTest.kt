@@ -115,6 +115,17 @@ class PeerClientTest {
     }
 
     @Test
+    fun `an inbound-only grant is never dialled`() {
+        val transport = FakeTransport { HttpJsonResponse(200, "{}") }
+        val result = PeerClient(transport = transport).probe(peer().copy(address = ""), seed)
+
+        // The honest state is "no address to call", not a red lamp caused by a
+        // connection to nowhere (D77).
+        assertEquals("PEER_NO_ADDRESS", (result as PeerClient.Probe.Failed).code)
+        assertEquals("no request may be attempted", 0, transport.calls)
+    }
+
+    @Test
     fun `an identity document is parsed and checked against its key`() {
         val document = """{"nodeId":"$nodeId","publicKey":"${Base64.getEncoder().encodeToString(publicKey)}","label":"Pixel 4a"}"""
         val transport = FakeTransport { HttpJsonResponse(200, document) }

@@ -15,13 +15,14 @@ package app.grom.sdk.ipc;
  * key/value access (D61), so an embedded project can only reach its own keys.
  * API 5 adds the operator's notification settings and a test send (D65).
  * API 6 adds this device's fleet identity, mutual pairing and the paired-device
- * roster (D70-D75).
+ * roster (D70-D75). API 7 adds a one-way scoped grant for a reader that only
+ * calls in — a hub on the operator's VPS — with no return address (D76-D78).
  * Every new method goes through the same per-transaction signature gate as the
  * older ones.
  */
 interface IGromServer {
 
-    /** API version; API 6 adds device identity, pairing and the fleet roster. */
+    /** API version; API 7 adds the one-way scoped grant for an inbound reader. */
     int apiVersion();
 
     /** Same JSON document as GET /grom/v1/health. */
@@ -172,4 +173,14 @@ interface IGromServer {
 
     /** Probes the paired devices now. Nothing is scheduled in the background. */
     String peerRefreshJson();
+
+    // --------------------------------------------------------- API 7 (D76-D78)
+
+    /**
+     * Trusts an inbound-only reader: `{publicKey, label?, nodeId?, scopes}`.
+     * The node id is derived from the key, so a key that promises another id is
+     * refused. The record has no address and is never dialled (D77); the caller
+     * stays a scope-limited peer, never an operator.
+     */
+    String peerGrantJson(String json);
 }

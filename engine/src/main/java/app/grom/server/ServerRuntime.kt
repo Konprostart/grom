@@ -260,7 +260,7 @@ class ServerRuntime(
 
     // ------------------------------------------------------------------ GromApi
 
-    override fun apiVersion(): Int = 6
+    override fun apiVersion(): Int = 7
 
     override fun authorize(candidate: String?): Boolean =
         candidate != null && Token.matches(token, candidate)
@@ -749,6 +749,12 @@ class ServerRuntime(
     }
 
     fun peerConfirmJson(body: String): String = fleet.confirmJson(body)
+
+    /**
+     * One-way scoped trust for an inbound reader such as a hub (D77). No data
+     * plane is required: the reader is the one that connects.
+     */
+    fun peerGrantJson(body: String): String = fleet.grantJson(body)
 
     fun peerRemove(nodeId: String) {
         fleet.removePeer(nodeId)
