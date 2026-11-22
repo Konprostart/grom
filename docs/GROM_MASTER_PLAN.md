@@ -1558,8 +1558,10 @@ Numbered, file-level, in dependency order. "Gate" names the check that proves it
 
 > **Phase B is delivered ahead of Phase 4** as Phase 1F (D70–D75): T-27 and
 > T-28 are implemented, plus the scoped peer client and the Devices section.
-> Deliberately **not** implemented: discovery, a heartbeat endpoint, placement
-> and a hub. Those stay here.
+> **Phase C is delivered as Phase 1G** (D76–D78): the VPS hub (`tools/grom-hub`),
+> a one-way scoped grant for an inbound reader, unique forward ports and
+> `SSH_FORWARD_REFUSED`. Deliberately **not** implemented: discovery, a
+> heartbeat endpoint, placement and a phone-side roster (C3). Those stay here.
 
 | # | task | files | gate |
 |---|---|---|---|

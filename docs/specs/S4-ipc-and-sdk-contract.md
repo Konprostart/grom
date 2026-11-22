@@ -337,3 +337,23 @@ until `peerConfirmJson({nodeId})`. `peerRefreshJson()` performs at most one
 measured probe per paired device (clamped to 16 per call) and MUST NOT schedule
 any future probe. `peerRemove(nodeId)` takes effect on the next request. Every
 API 6 method MUST pass the same per-transaction signature gate (S4-R007).
+
+## 12. API 7 — inbound-only trust for a hub (D76–D78)
+
+`apiVersion()` returns `7`. API 7 is additive: every API 1–6 method is
+unchanged. It adds one method:
+
+```aidl
+String peerGrantJson(String json);
+```
+
+### S4-R049 (API 7)
+`peerGrantJson({publicKey, label?, nodeId?, scopes})` MUST trust a reader that
+only calls in, such as the hub on the operator's VPS. The `nodeId` MUST be
+derived from the public key (`Ed25519.keyId`); a supplied `nodeId` that does not
+match MUST be refused with `BAD_PUBLIC_KEY`, and this device's own key MUST be
+refused with `PEER_SELF`. At least one known scope is required
+(`SCOPE_REQUIRED` / `BAD_SCOPE`). The stored record MUST have an empty address,
+MUST never be probed, and MUST resolve to a `Principal.Peer` with exactly those
+scopes — never to an operator. Every API 7 method MUST pass the same
+per-transaction signature gate (S4-R007).

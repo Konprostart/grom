@@ -48,6 +48,10 @@ to five explicit, operator-initiated cases:
    only when the operator joins or refreshes the fleet. No host is compiled in,
    and the client uses the shared transport (S1-R040).
 
+The VPS hub (D76) is an **operator-run tool outside the APK**; it adds no
+outbound case to Grom, because the phone never connects to it. The hub connects
+to the phone through the operator's existing reverse SSH tunnel.
+
 There is no scheduler, no retry loop and no connection that Grom starts by
 itself. The notification case allows at most one additional attempt per message
 (D66) and no periodic tick of any kind.
@@ -272,3 +276,14 @@ A paired-device address MUST NOT appear in `GET /v1/status`, in
 `GET /v1/health` or in the sanitised configuration export. It is returned only
 over the signature-gated Binder. `/v1/status` MAY report this device's own
 `nodeId` and `label`; `/v1/health` MUST NOT report either.
+
+## 15. VPS hub and inbound-only trust (D76–D78)
+
+### S1-R044
+A one-way grant MUST be an explicit operator action that supplies only a public
+key: the `nodeId` is derived from that key, at least one scope is required, and
+the resulting record MUST have no address. Such a record MUST never be dialled,
+MUST be a scope-limited peer and MUST never become an operator key. A hub
+(D76) MUST be an operator-run tool outside the APK; no Grom function may depend
+on it. Its roster MUST listen on loopback only and MUST carry no address, port
+or key.

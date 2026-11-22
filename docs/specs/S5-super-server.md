@@ -455,3 +455,18 @@ rebind: the key lookup and the principal mapping read the peer store live
 The public status is a projection, not a state store: `fleet` MUST be built from
 the identity record alone, and the agent plugin's `status` op MUST carry the same
 block through `statusExtra` without adding a peer list.
+
+### S5-R050
+A one-way grant (D77) MUST be admitted without a new route and without
+restarting the listener: the granted key joins the live key lookup, the record
+has no address, and it resolves to `Principal.Peer` with exactly the granted
+scopes. `peerRefreshJson()` MUST skip a record with no address instead of
+dialling it; skipping is not a failed measurement.
+
+### S5-R051
+The VPS hub (D76) is a separate operator-run tool and MUST NOT be a dependency
+of the data plane. It polls `GET /v1/status` over the operator's reverse SSH
+tunnel and serves its roster on **loopback only**; the roster MUST carry no
+port, address, key or credential. A phone whose tunnel is down is `unreachable`
+in the roster, never `alive`, and no phone behaviour depends on the hub being
+reachable.

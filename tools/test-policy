@@ -3,10 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D75 and S1-R002…S1-R043,
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D78 and S1-R002…S1-R044,
 # S5-R001…S5-R049.
 #
-# The gate is intentionally a fixed count: "37/37" is the number of passes.
+# The gate is intentionally a fixed count: "41/41" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -94,9 +94,9 @@ check "boot restart is opt-in" \
 check "boot respects quarantine" \
   grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
 
-# 15. every IPC transaction checks signatures (API 6 has 35 transactions)
+# 15. every IPC transaction checks signatures (API 7 has 37 transactions)
 check "every IPC transaction applies the signature gate" \
-  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 35 ]"
+  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 37 ]"
 
 # 16. cleartext outbound traffic is not enabled
 check "no usesCleartextTraffic" \
@@ -213,6 +213,27 @@ check "pairing is constant-time, bounded and explicitly opened" \
 #     work, and the fleet status block names no address (D59).
 check "peers are scoped and no address reaches status" \
   bash -c "grep -q 'SCOPE_REQUIRED' $MAIN/superserver/SuperRouter.kt && grep -q 'hasScope' $MAIN/superserver/SuperRouter.kt && ! grep -q '\"address\"' $MAIN/cluster/FleetStatus.kt && awk '/path == HEALTH/{h=NR} /auth\.authenticate/{a=NR} END{exit !(h>0 && a>h)}' $MAIN/superserver/SuperRouter.kt"
+
+# 38. a remote forward port is unique per host (D78). Two saved servers on one
+#     VPS asking for the same port would collide at connect time, so the store
+#     refuses the second one before it can write.
+check "a remote forward port is unique per host" \
+  bash -c "grep -q 'BAD_FORWARD_PORT_CONFLICT' $MAIN/ssh/SshTarget.kt && grep -q 'fun forwardPortConflict' $MAIN/ssh/SshTarget.kt && grep -q 'forwardPortConflict(' $MAIN/ssh/SshTargetStore.kt && grep -q 'BAD_FORWARD_PORT_CONFLICT' engine/src/test/java/app/grom/server/ssh/SshTargetStoreTest.kt"
+
+# 39. a server refusing the remote port is its own failure, not "the network is
+#     down". The forward call sits in its own try with its own catch (D78).
+check "a refused forward is a distinct failure" \
+  bash -c "grep -q 'SSH_FORWARD_REFUSED' $MAIN/ssh/SshTunnelManager.kt && grep -q 'catch (refused: Throwable)' $MAIN/ssh/SshTunnelManager.kt && grep -q 'SSH_FORWARD_REFUSED' engine/src/test/java/app/grom/server/ssh/SshTunnelManagerTest.kt"
+
+# 40. a one-way grant (D77) has no address, so it is never dialled, and the
+#     grant path cannot mint an operator: a stored peer is always a Peer.
+check "an inbound-only grant is never dialled" \
+  bash -c "grep -q 'PEER_NO_ADDRESS' $MAIN/cluster/PeerClient.kt && grep -q 'fun isInboundOnly' $MAIN/cluster/PeerRecord.kt && grep -q 'isInboundOnly()' $MAIN/cluster/FleetService.kt && grep -q 'fun grant(' $MAIN/cluster/PeerStore.kt && ! grep -q 'Principal.Operator' $MAIN/cluster/PeerStore.kt && grep -q 'Principal.Peer(peer.nodeId, peer.grantedByMe)' $MAIN/cluster/FleetService.kt"
+
+# 41. the hub roster names devices and nothing else (D78): a port, an address
+#     or a key in that projection would let the roster file leak the topology.
+check "the hub roster carries no address or key" \
+  bash -c "grep -q 'ROSTER_FIELDS' tools/hub/GromHub.java && ! grep -qE 'ROSTER_FIELDS[[:space:]]*=[[:space:]]*List\.of\([^)]*(url|address|port|publicKey|key)' tools/hub/GromHub.java && grep -q '\"label\", \"nodeId\", \"state\", \"lastSeenMs\", \"lastError\"' tools/hub/GromHub.java"
 
 echo
 TOTAL=$((PASS + FAIL))

@@ -99,7 +99,7 @@ missing. Ask the server for the truth:
 ```kotlin
 val client = GromEmbed.newClient(context)   // Target.EMBEDDED
 client.bind(object : GromClient.Listener {
-    override fun onConnected(apiVersion: Int) { /* apiVersion == 6 */ }
+    override fun onConnected(apiVersion: Int) { /* apiVersion == 7 */ }
     override fun onDisconnected(reason: String) { /* show the reason */ }
 })
 val status = client.call(null) { it.statusJson() }
@@ -138,6 +138,7 @@ disk.
 | `lightningProbeJson()` | run the Lightning `health` op now |
 | `notifySettingsJson()` … `notifyTestJson()` | **API 5**: the operator's Telegram alerts (D65) |
 | `nodeIdentityJson()` … `peerRefreshJson()` | **API 6**: the device identity, mutual pairing and the paired-device roster (D70–D75) |
+| `peerGrantJson(json)` | **API 7**: one-way trust for an inbound reader such as a VPS hub (D76–D78) |
 
 Every method runs the same per-transaction signature check as API 1 and 2. A
 foreign certificate still never reaches the server state.

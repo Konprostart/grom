@@ -214,10 +214,14 @@ Devices section. The CLI stays useful because it needs nothing installed on a
 phone and works from a laptop. See [`CLUSTER.md`](CLUSTER.md) for the in-app flow
 and the security model.
 
+**Phase C is now implemented as `tools/grom-hub`** (D76–D78): it reaches every
+phone through the reverse tunnel that already exists, so it works behind CGNAT,
+and it serves one loopback roster. A phone is admitted with a one-way scoped
+grant (`Devices → Trust a key`), each phone uses its own forward port, and the
+roster carries no address or key. See [`HUB.md`](HUB.md).
+
 Remaining phases each need a written decision first:
 
-* **Phase C — VPS hub** — one place that reaches every phone through the
-  reverse tunnel that already exists, so control works behind CGNAT.
 * **Phase D — storage catalogue and vault backup** — no merged disk; a
   catalogue plus one device with a real disk.
 * **Phase E — Linux/PC node** — a worker, never a control plane.

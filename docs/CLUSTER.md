@@ -89,6 +89,21 @@ Revoking is **Remove** in the peer dialog. The key lookup reads the peer store o
 every request, so removal takes effect immediately without restarting the
 listener.
 
+### A hub instead of 45 pairings
+
+Mutual pairing is for two devices that know each other. A VPS hub that only
+reads status does not need a handshake, so it uses a **one-way grant**
+(D77): **Devices → Trust a key**, paste the hub's Ed25519 public key, name it,
+choose scopes. The key id is derived from the key, the stored record has **no
+address**, and the hub is never dialled; `Refresh` skips it instead of recording
+a false failure. The hub stays a `Principal.Peer` with exactly those scopes and
+can never become an operator key.
+
+Revoking a grant is removing the row, exactly like a pairing. When a phone sits
+behind CGNAT, the hub reaches it through the reverse SSH tunnel the phone
+already opens — not through an address the phone publishes. See
+[`HUB.md`](HUB.md) for the VPS side.
+
 ## 5. What the lamps mean
 
 | Lamp | State | Meaning |
@@ -145,6 +160,7 @@ signature-gated Binder, which the operator's own app already controls.
 | `PEER_UNREACHABLE` | a measured probe failed |
 | `PEER_UNAUTHORIZED` | the peer no longer accepts this device's key |
 | `PEER_SCOPE_REQUIRED` | the peer key exists but lacks the scope |
+| `PEER_NO_ADDRESS` | a one-way grant: nothing to dial, so no probe was attempted |
 | `PEER_IDENTITY_CHANGED` | the peer was reset and now has a different key |
 | `IDENTITY_CORRUPT` | the identity file cannot be verified; reset explicitly |
 
@@ -159,5 +175,6 @@ signature-gated Binder, which the operator's own app already controls.
 
 Real Ed25519 keys are used in `PairingTest` and `FleetServiceTest`; the router is
 a pure function over an `HttpRequest`, so the scope matrix needs no socket.
-`tools/test-policy` #34–#37 pin the socket surface, the sealed seed, the pairing
-bounds and the scope gate.
+`tools/test-policy` #34–#41 pin the socket surface, the sealed seed, the pairing
+bounds, the scope gate, the one-way grant and the hub roster. `PeerGrantTest`
+covers the inbound-only path end to end at the model level.

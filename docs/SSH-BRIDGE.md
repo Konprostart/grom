@@ -86,7 +86,7 @@ Fingerprints use the OpenSSH `SHA256:…` form, the same string as
 | Simultaneously active tunnels | 2 |
 | Connect / auth timeout | 15 s each |
 | Remote bind address | `127.0.0.1` on the VPS |
-| Forward port | per target, default 47002 |
+| Forward port | per target, default 47002; **must be unique per host** when several phones use one VPS (41001–41099 by convention, D78) |
 
 Saved servers are not capped: the count limit was removed because adding a
 server costs no phone resource, and the store refuses an over-size write with
@@ -150,6 +150,8 @@ loopback-only and reach it through the SSH session itself.
 | `HOST_KEY_MISMATCH` | pinned key changed; connection refused |
 | `SSH_TIMEOUT` | connect or auth timed out |
 | `SSH_UNAVAILABLE` | connection refused / DNS / network |
+| `SSH_FORWARD_REFUSED` | the server refused the remote port (already in use, or forwarding forbidden) — distinct from a network failure (D78) |
+| `BAD_FORWARD_PORT_CONFLICT` | the store refused a second target on the same host with the same forward port |
 | `SSH_FAILED` | anything else; the message is never the driver's |
 
 After a tunnel drops unexpectedly the state is `failed` with

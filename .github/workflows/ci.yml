@@ -82,6 +82,9 @@ jobs:
       - name: Fleet view self-test
         run: ./tools/test-fleet
 
+      - name: Hub roster self-test
+        run: ./tools/test-hub
+
       - name: Lint (both flavours)
         run: |
           gradle --no-daemon --stacktrace \

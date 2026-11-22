@@ -1144,3 +1144,53 @@ the "no host compiled in" property that makes the outbound list auditable.
 
 *Enforced by:* `PeerClientTest`, `ClusterRouterTest`, `tools/test-policy`
 #17/#27/#34, and `docs/CLUSTER.md` §5.
+
+## D76 — the VPS hub is an operator-run tool, not a Grom service
+**ACCEPTED.** Phase C is a small program in `tools/grom-hub`, run by the
+operator on their own VPS. It is not shipped in the APK, Grom does not call it,
+and no phone function depends on it: if the hub is down, the phones keep
+working and only the roster is missing. It polls the documented data plane
+through the reverse SSH tunnel the operator already opens, so a phone behind
+CGNAT is reachable without a LAN bind and without a public port.
+
+The hub's key is a mode-0600 file owned by a dedicated user, because a VPS has
+no Android Keystore. That limitation is stated plainly rather than papered over.
+
+*Why:* a service would need onboarding, updates, an account and a trust decision
+about who runs it. A tool is something the operator starts, reads and stops.
+
+*Enforced by:* `docs/HUB.md`, `tools/test-hub`, `tools/test-policy` #41.
+
+## D77 — a one-way scoped grant, not a second pairing
+**ACCEPTED.** A reader that only calls in (the hub) is admitted by pasting its
+Ed25519 public key under Devices → Trust a key and choosing scopes. The key id is
+derived from the key, at least one scope is required, and the stored record has
+**no address**: the phone never dials it, and `refresh` skips it rather than
+recording a false failure. The caller is a `Principal.Peer` with exactly those
+scopes and can never become an operator key.
+
+There is no handshake, no code and no auto-approval: the operator still supplies
+the key and picks the scopes by hand. The grant is revocable by removing the row,
+which takes effect on the next request.
+
+*Why:* mutual pairing needs a Grom engine on both sides; a hub is not one.
+Deriving the id prevents a pasted key from claiming an identity it does not have.
+
+*Enforced by:* `PeerGrantTest`, `PeerClientTest` (no dial for an empty address),
+`SuperAuthPrincipalTest`, `tools/test-policy` #40.
+
+## D78 — one forward port per phone; a refused forward is its own failure
+**ACCEPTED.** Each SSH target on one host MUST use a distinct
+`remoteForwardPort` (one per phone, 41001–41099 by convention). The store
+refuses a duplicate with `BAD_FORWARD_PORT_CONFLICT` before writing, and the
+tunnel manager reports a server that refuses the forward as
+`SSH_FORWARD_REFUSED` rather than `SSH_FAILED`, because the two send the
+operator to different places. The hub roster listens on loopback only and
+carries no port, address or key.
+
+*Why:* with every target defaulting to 47002, the second phone on a VPS failed
+in a way that looked like a network problem — the exact confusion a hub must
+not create.
+
+*Enforced by:* `SshTargetStoreTest`, `SshTunnelManagerTest`, `tools/test-hub`,
+`tools/test-policy` #38/#39.

@@ -16,14 +16,15 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1D — integration ergonomics** | **done** | `ProjectNamespace` + API 4 `projectExec` (D61), `GromProject`, real heartbeat in `GromEmbed`, "How Grom works" section (D62), external Lightning node reference (D63), unlimited saved SSH servers (D64) |
 | **1E — fleet view (Phase A)** | **done** | `tools/grom-fleet` + `tools/fleet/`, read-only over the existing public data plane; `docs/FLEET.md`; `tools/test-fleet` |
 | **1F — identity, pairing, fleet (Phase B)** | **done (code)** | `engine/.../cluster/`, API 6, scoped peers, Devices section; `docs/CLUSTER.md`; D70–D75 |
+| **1G — VPS hub and inbound-only trust (Phase C)** | **done** | `tools/grom-hub` + `tools/hub/`, one-way scoped grant (API 7), unique forward ports, `SSH_FORWARD_REFUSED`; `docs/HUB.md`; D76–D78 |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
-| **4 — multi-device** | blocked by 3 | `cluster/` — identity/pairing already delivered as 1F; hub, placement and discovery remain |
+| **4 — multi-device** | blocked by 3 | `cluster/` — identity/pairing delivered as 1F and the hub as 1G; placement, discovery and a phone-side roster remain |
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.11.0` (versionCode 11). The ten gates in `tools/run-gates` are
+Current version: `0.12.0` (versionCode 12). The eleven gates in `tools/run-gates` are
 the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
@@ -458,3 +459,26 @@ Not closed by this phase: nothing has been run against a physical phone (B2),
 there is no TLS (D47), no global revoke, and pairwise pairing does not scale
 beyond a handful of devices. **Phase C (VPS hub)** is the answer for many phones
 behind CGNAT and needs its own decision.
+
+### Phase 1G — VPS hub and inbound-only trust, Phase C — **done**
+
+| file | what it is |
+|---|---|
+| `tools/grom-hub` | launcher; requires only a JDK 17 |
+| `tools/hub/GromHub.java` | identity init, signed poller, loopback roster, self-test |
+| `tools/hub/hub.example.json` | documented schema, one port per phone |
+| `tools/test-hub` | protocol tests against a strict signature verifier |
+| `engine/.../cluster/PeerStore.kt` | `grant()`: derived id, no address, scopes required |
+| `engine/.../cluster/PeerClient.kt` | `PEER_NO_ADDRESS`: an empty address is never dialled |
+| `engine/.../ssh/SshTargetStore.kt` | one forward port per host (`BAD_FORWARD_PORT_CONFLICT`) |
+| `engine/.../ssh/SshTunnelManager.kt` | `SSH_FORWARD_REFUSED` for a refused forward |
+| `app/.../GromActivity.kt`, `ui/FleetModel.kt` | "Trust a key", inbound-only rows |
+| `docs/HUB.md` | topology, setup, failure behaviour, security |
+
+Gate: `tools/run-gates` **11/11** (the hub self-test is the new eleventh gate),
+policy **41/41**, both flavours green, lint 0/0.
+
+Not closed by this phase: nothing has been run against a physical phone (B2) or
+a real VPS from this repository; there is no phone-side roster (C3, deliberately
+deferred); the hub is a single point of *observation*, not of operation; and a
+phone that is off produces no message and no row update.

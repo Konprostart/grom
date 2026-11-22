@@ -142,12 +142,13 @@ gradle :engine:testDebugUnitTest          # engine: supervisor, HTTP, data plane
 gradle :app:testServer29DebugUnitTest     # app: dashboard projection, update check
 gradle :app:lint                          # lint, 0 errors required
 tools/check-third-party                   # dependency ledger matches the build
-tools/test-policy                         # 33 static invariants
+tools/test-policy                         # 41 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
 tools/test-agent-runtime                  # grom-agent.js protocol + degradation
 tools/check-site                          # download page: static, no third parties
 tools/verify-ipc-signing                  # C-008, needs the three APKs
 tools/test-fleet                          # tools/grom-fleet protocol tests
+tools/test-hub                            # tools/grom-hub protocol tests
 ```
 
 `verify-ipc-signing` needs:
@@ -212,9 +213,32 @@ Grom does not poll in the background.
 
 The honest limits: Grom signs its traffic but does not encrypt it (D47), there
 is no global revoke because there is no account, and pairwise pairing does not
-scale past a handful of devices — a hub on a VPS is the next phase.
+scale past a handful of devices.
+
+For a reader that only calls in — a hub on your VPS — use **Devices → Trust a
+key**: paste its public key and choose scopes. It gets no address, is never
+dialled, and stays a scope-limited peer.
 
 Full guide: **`docs/CLUSTER.md`**.
+
+## Hub (several phones behind any network)
+
+`tools/grom-hub` runs on your VPS and polls the phones through the reverse SSH
+tunnels they already open, so it works behind CGNAT without exposing a single
+port. It serves one loopback roster and changes nothing in the app:
+
+```bash
+tools/grom-hub identity --init                       # mode-0600 key, prints the public key
+tools/grom-hub check --config hub.json               # one pass, table, exit code
+tools/grom-hub run   --config hub.json               # roster on 127.0.0.1:47100
+```
+
+Each phone needs its **own** forward port (41001–41099); the store refuses a
+duplicate and the tunnel reports `SSH_FORWARD_REFUSED` distinctly. The roster
+carries a label, node id and measured state — never a port, address or key. If
+the hub is down, the phones keep working and only the roster is missing.
+
+Full guide: **`docs/HUB.md`**.
 
 ## Embedding Grom in your app
 
