@@ -470,3 +470,17 @@ tunnel and serves its roster on **loopback only**; the roster MUST carry no
 port, address, key or credential. A phone whose tunnel is down is `unreachable`
 in the roster, never `alive`, and no phone behaviour depends on the hub being
 reachable.
+
+### S5-R052 (D84)
+The authenticated `/v1/status` MAY carry a `doctor` object with exactly
+`batteryExempt`, `backgroundRestricted` and `lastUnexpectedStopMs`. It MUST be
+read at request time from a cheap probe, MUST NOT be cached at start, and MUST
+carry nothing else from the diagnostics surface — no exit history, no free text,
+no memory, thermal or network detail. `/v1/health` MUST remain unchanged, public
+and free of the block.
+
+### S5-R053
+The Doctor MUST be local to the device apart from S5-R052: it MUST NOT appear in
+`GET /v1/config`, in the sanitised export or in the fleet block, and the deep
+system facts it cannot read (Doze whitelist, phantom-process limit, app-ops,
+vendor lists) MUST be read by the operator over adb rather than by the app.

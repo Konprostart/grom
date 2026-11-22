@@ -13,13 +13,13 @@ It lives outside the Android tree on purpose:
   with no build step.
 
 It is the first half of the plan agreed after reviewing similar projects
-(phoneborg's provisioner was the reference for the approach); the second half —
-a "Doctor" screen that explains why Android keeps stopping a server — is still
-ahead.
+(phoneborg's provisioner was the reference for the approach). The second half —
+the **Doctor** that explains why Android keeps stopping a server — is now in the
+app (`docs/DOCTOR.md`) and in this tool as a fifth command, `doctor`.
 
 ## What it actually does
 
-Four commands, in increasing order of consequence.
+Five commands, in increasing order of consequence.
 
 | command | effect |
 |---|---|
@@ -27,6 +27,7 @@ Four commands, in increasing order of consequence.
 | `plan` | read-only: the exact steps `apply` would take, and what is blocked |
 | `apply` | install the APK, ask for a battery exemption, assign a forward port |
 | `emit` | turn the recorded state into a `hub.json` for `tools/grom-hub` |
+| `doctor` | read-only: the settings Android does not show an app (`--fix` changes two) |
 
 Everything `list` and `plan` do is measurement: `adb devices`, `getprop`,
 `dumpsys package`, `dumpsys deviceidle whitelist`. Neither writes to a phone or
@@ -159,6 +160,67 @@ should not guess. The hub path needs only the loopback ports, which the tool
 does know. Write `fleet.json` by hand if you want the direct LAN view
 (`docs/FLEET.md`).
 
+## `doctor`
+
+The questions an ordinary app cannot ask (D81). It reads, for each phone:
+
+| question | command |
+|---|---|
+| is Grom whitelisted from Doze? | `dumpsys deviceidle whitelist` |
+| is background work allowed? | `cmd appops get app.grom.server RUN_ANY_IN_BACKGROUND` |
+| what is the phantom-process limit? | `device_config get activity_manager max_phantom_processes` |
+| is phantom monitoring on? | `settings get global settings_enable_monitor_phantom_procs` |
+| does Wi-Fi sleep with the screen off? | `settings get global wifi_sleep_policy` |
+
+```
+$ tools/grom-provision doctor
+pixel-7  (R58M11111)
+  doze whitelist           yes
+  appops background        app.grom.server: No operations.
+  max phantom processes    null
+  phantom monitor          null
+  wifi sleep policy        2
+  findings: none
+
+pixel-4a  (R58M22222)
+  doze whitelist           no
+  appops background        RUN_ANY_IN_BACKGROUND: deny
+  wifi sleep policy        0
+  findings: DOCTOR_NOT_WHITELISTED, DOCTOR_APPOPS_DENIED, DOCTOR_WIFI_SLEEP_NOT_ALWAYS
+```
+
+Exit code `1` means "at least one phone needs attention", which makes it usable
+from a cron job; `--json` is the same data for a script.
+
+**A command that answers nothing is printed as `unknown`, never as `0`.** That is
+the same rule the in-app screen follows: `no` means "measured, and it is not
+exempt", while `unknown` means "this ROM did not answer", and the two are not
+interchangeable.
+
+### `--fix`
+
+The only mutating path in this command, and it is limited to two changes:
+
+| what | when |
+|---|---|
+| `dumpsys deviceidle whitelist +app.grom.server` | the phone answered `no` |
+| `settings put global wifi_sleep_policy 2` | **only** on API 28 and older |
+
+`wifi_sleep_policy` is a legacy setting: from Android 10 the platform manages
+Wi-Fi power itself and the value is ignored, so the tool does not pretend to fix
+something there. It never changes an app-op (that is the operator's decision, and
+`cmd appops set` can grant far more than Wi-Fi), never removes a package, and
+never restarts a phone.
+
+Both changes are **re-read** afterwards, so the report says what the phone now
+reports rather than what the tool asked for. If a vendor silently ignores the
+whitelist request, the second read still says `no` and the exit code stays `1` —
+the tool does not get to declare success on your behalf.
+
+The suite enforces this structurally: every invocation the tool issues must match
+a fixed allow-list (`ALLOWED_COMMAND_PREFIXES` in the source), so a command
+nobody anticipated fails a test instead of passing quietly.
+
 ## What it refuses to do
 
 This is a setup tool, not fleet management, and it is intentionally unable to
@@ -221,8 +283,10 @@ configuration.
   code), because that would need the phone to be reachable first.
 * **Battery exemption is not immortality.** It keeps Doze from freezing the
   process, but vendor task killers, the phantom-process limit and low memory
-  can still stop it. That diagnosis is the planned "Doctor" screen, not this
-  tool.
+  can still stop it. `doctor` reports what those settings say; it cannot make a
+  vendor ROM honour them, and `--fix` covers only the two changes above.
+* **`doctor` is a snapshot.** It reads at the moment you run it; a phone that
+  looks fine now can be throttled an hour later.
 * **One cable, one phone at a time** in practice: several phones can be
   connected through a hub, and `--serial` selects one, but `adb install` is
   serialised.

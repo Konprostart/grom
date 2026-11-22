@@ -1217,5 +1217,102 @@ no SSH targets, no pairing), because those are per-device decisions with their
 own UI confirmations, and it emits only `hub.json` — a `fleet.json` needs a LAN
 address the computer cannot know.
 
-*Enforced by:* `tools/test-provision` (76 cases incl. a recorded-invocation
-check and `VERIFY_FAILED` for an unconfirmed install), `tools/test-policy` #42.
+*Amendment (phase b, D81):* the tool also has a `doctor` command, which reads the
+settings an app cannot read — the Doze whitelist, `cmd appops get … 
+RUN_ANY_IN_BACKGROUND`, `device_config … max_phantom_processes`,
+`settings_enable_monitor_phantom_procs` and `wifi_sleep_policy` — and prints them
+with stable finding codes. `--fix` is the only mutating path and is limited to
+**two** changes: adding the package to the Doze whitelist, and setting the legacy
+`wifi_sleep_policy` **only on API 28 and older**, where it actually has an effect.
+It never changes an app-op, never removes a package and never restarts a phone.
+Both changes are re-read afterwards, so the report states what the phone now says
+rather than what the tool asked for. The self-test enforces this structurally:
+every command the tool issues must match a fixed allow-list, so a verb nobody
+thought of fails the test instead of passing silently.
+
+*Enforced by:* `tools/test-provision` (96 cases incl. a recorded-invocation
+allow-list, the doctor read/fix paths and `VERIFY_FAILED` for an unconfirmed
+install), `tools/test-policy` #42.
+
+## D80 — the Doctor is local, on-demand and read-only
+**ACCEPTED.** "Why does my phone keep stopping the server?" is answered by a
+Doctor section that measures, explains and opens system settings. It MUST NOT
+change a system setting, run a shell, ask for root, start a timer or poll in the
+background. It measures when the operator opens the section or taps "Measure
+again", and at no other time.
+
+Every row is exactly one of three things, and they are never blurred:
+*measured* (green or red, from a value Android returned), *notice* (a measured
+thing that is neither healthy nor a fault, grey), and *unknown* (this Android did
+not answer — grey, and the row says so in words). The verdict MAY be green only
+when every check measured `OK`; a report with an unknown row is "partly unknown"
+even if nothing is wrong, because a green headline that hides an unmeasured line
+is the lie this screen exists to prevent.
+
+*Why:* the app cannot know whether doze, a vendor killer or a flat battery ended
+the process, and guessing would make the screen useless exactly when it is
+needed. Reporting only what was measured keeps it trustworthy; refusing to be
+green while anything is unknown keeps it honest.
+
+*Enforced by:* `DoctorRulesTest` (a "nothing measured is not a pass" case and a
+"unknown keeps the verdict from turning green" case), `DoctorModelTest`,
+`tools/test-policy` #43/#44/#45.
+
+## D81 — the deeper system facts are read by the operator, over adb
+**ACCEPTED.** The Doze whitelist, `device_config max_phantom_processes`,
+`settings_enable_monitor_phantom_procs`, app-ops and vendor auto-start lists are
+not readable by an ordinary app. The Doctor MUST show the exact commands, offer
+to copy them, and MUST NOT run them. `tools/grom-provision doctor` MAY read them
+from a computer, because there the operator is already the one holding the cable.
+
+*Why:* the alternative is a permission the platform does not offer, or a shell
+that would make Grom a privilege-escalation surface. Showing the command teaches
+the operator what the setting does; running it silently would leave them without
+that knowledge and with a tool that can change anything.
+
+*Enforced by:* `tools/test-policy` #44 (no shell symbol in `engine/doctor/`),
+`tools/test-provision` (the `doctor` command's allow-list).
+
+## D82 — the Doctor permission budget is two normal permissions
+**ACCEPTED.** The Doctor MAY declare `ACCESS_NETWORK_STATE` (to name the
+transport) and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (to offer Android's own
+one-tap exemption dialog). It MUST NOT declare `QUERY_ALL_PACKAGES`,
+`PACKAGE_USAGE_STATS`, `SYSTEM_ALERT_WINDOW`, and MUST NOT ask for root. Where a
+probe would need one of those, the field stays null and the row is `unknown`.
+
+*Why:* every extra permission widens what a compromised build could reach, and
+none of them is needed to answer the question. Grom is installed by hand rather
+than through Play, which is why the battery permission is acceptable at all; that
+fact is documented rather than assumed.
+
+*Enforced by:* `tools/test-policy` #46, `AndroidDoctorProbe` (every call is
+guarded and returns null).
+
+## D83 — an unexpected stop is a fact; its cause is reported only when the OS says it
+**ACCEPTED.** `GromService` writes a run marker on `onCreate` (`cleanStop=false`)
+and on `onDestroy` (`cleanStop=true`). If the next start reads `false`, the
+previous process ended without `onDestroy` — a fact. The *reason* is reported only
+from `ApplicationExitInfo` (API 30+); below that the row is `unknown` and says the
+version does not record exit reasons. `lastUnexpectedStopMs` is the **detection**
+time, never a fabricated death time, because the marker cannot know the moment.
+
+*Why:* "it died" and "Android killed it for memory" are different facts with
+different fixes. Conflating them would put a plausible-sounding cause on screen
+with nothing behind it.
+
+*Enforced by:* `RunMarkerStoreTest` (detection time, corrupt file, clamping),
+`DoctorRulesTest` (every `REASON_*`, API 29 vs 30), `tools/test-policy` #45.
+
+## D84 — `/v1/status` may carry three Doctor booleans, and nothing else
+**ACCEPTED.** The authenticated status document MAY include
+`doctor {batteryExempt, backgroundRestricted, lastUnexpectedStopMs}` so a hub can
+say *why* a phone is unreachable rather than only that it is. Nothing else from
+the Doctor leaves the device: no exit history, no free text, no memory, thermal or
+network detail. `/v1/health` stays unchanged and stays public. The block is read
+at request time from a cheap two-call probe, never cached at start.
+
+*Why:* a roster that says "unreachable" is less useful than one that says
+"unreachable, and this phone is not exempt from Doze". Three booleans answer that
+without turning the status document into a device fingerprint.
+
+*Enforced by:* `tools/test-policy` #47, `DoctorFacadeTest`, `DoctorDocumentTest`.

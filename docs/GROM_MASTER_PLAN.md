@@ -629,6 +629,12 @@ Every `[DEVICE]` row above **needs testing on hardware** before it is claimed;
 the tag is the shorthand for that sentence. No row in this table has been
 measured, and none of them may be copied into a release note as if it had.
 
+Phase 1I (D80–D84) is where most of these rows become observable rather than
+assumed: the Doctor reports the exemption, the restriction, the standby bucket,
+the notification state and the platform's own exit reason, and it prints
+`unknown` where Android does not answer. That is reporting, not prevention — the
+promise column above is unchanged by it.
+
 ### H.6 What Grom promises, and what it does not
 
 Grom promises **a truthful state**: if the service is killed the app says so when
@@ -1563,8 +1569,11 @@ Numbered, file-level, in dependency order. "Gate" names the check that proves it
 > `SSH_FORWARD_REFUSED`. Phone setup from a computer is Phase 1H
 > (`tools/grom-provision`, D79) — it installs the signed APK, asks for the
 > battery exemption and assigns the forward port, and it destroys nothing on the
-> device. Deliberately **not** implemented: discovery, a heartbeat endpoint,
-> placement and a phone-side roster (C3). Those stay here.
+> device. Diagnostics are Phase 1I (`engine/.../doctor/`, `docs/DOCTOR.md`,
+> D80–D84): the phone explains why Android stopped it, from measurements only,
+> and publishes three booleans in `/v1/status`. Deliberately **not**
+> implemented: discovery, a heartbeat endpoint, placement and a phone-side
+> roster (C3). Those stay here.
 
 | # | task | files | gate |
 |---|---|---|---|

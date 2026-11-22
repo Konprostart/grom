@@ -357,3 +357,12 @@ refused with `PEER_SELF`. At least one known scope is required
 MUST never be probed, and MUST resolve to a `Principal.Peer` with exactly those
 scopes — never to an operator. Every API 7 method MUST pass the same
 per-transaction signature gate (S4-R007).
+
+### S4-R050 (API 8)
+`doctorJson()` MUST return one measured Doctor report: a verdict, the ordered
+checks with a stable level and code, and the facts behind them. It MUST be
+read-only, MUST be callable while the server is stopped (the device can be
+measured without it), MUST contain no credential, identifier, address or free
+text, and MUST pass the same per-transaction signature gate as every other
+method (S4-R007). A client MUST be able to tell `unknown` from a measured `false`
+without parsing a sentence.

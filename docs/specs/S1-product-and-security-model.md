@@ -287,3 +287,20 @@ MUST be a scope-limited peer and MUST never become an operator key. A hub
 (D76) MUST be an operator-run tool outside the APK; no Grom function may depend
 on it. Its roster MUST listen on loopback only and MUST carry no address, port
 or key.
+
+## 16. Doctor and on-device diagnostics (D80–D84)
+
+### S1-R045
+Grom MUST provide a diagnostics surface that reports, per check, one of exactly
+three kinds of outcome: a **measured** value (healthy or faulty), a **notice**
+(measured, neither healthy nor faulty) or **unknown** (this Android did not
+answer). A check MUST be reported healthy only from a value the platform
+returned; configuration MUST NOT produce a healthy outcome. The headline MUST NOT
+report success while any check is unknown. The surface MUST NOT change a system
+setting, execute a shell, request root, start a timer or poll in the background;
+it MAY request the platform's own battery-exemption dialog, which is the single
+system change it is allowed to ask for. An unexpected process end MUST be
+reported as a fact derived from a run marker, and its cause MUST be reported only
+when the platform supplies one; below API 30 the cause MUST be unknown. The
+diagnostic report MUST be an allow-list that carries no token, chat id, SSH host,
+key, address or free text.

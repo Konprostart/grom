@@ -60,6 +60,8 @@ second process (D58).
 | SSH bridge on a device | **open** — never run on hardware, like the rest of the server |
 | Devices (identity, pairing, fleet) | **delivered in code** — one Ed25519 key per phone, mutual pairing with fingerprints, scoped peers, measured lamps (D70–D75) |
 | Devices on a device | **open** — pairing has never been exercised between two physical phones |
+| Doctor (why Android stops the server) | **delivered in code** — measured checks, honest `unknown`, run marker, API 8, three booleans in `/v1/status` (D80–D84) |
+| Doctor on a device | **open** — no physical phone has been measured |
 
 When the runtime is genuinely absent, the app reports `MISSING_RUNTIME` and the
 agent endpoints answer `503` naming the missing file. That is the designed
@@ -252,6 +254,7 @@ tools/grom-provision list                                    # what is connected
 tools/grom-provision plan  --apk grom-server29.apk           # what apply would do
 tools/grom-provision apply --apk grom-server29.apk --flavour server29
 tools/grom-provision emit  --hub hub.json                    # config for grom-hub
+tools/grom-provision doctor                                  # what an app cannot read
 ```
 
 Every result is read back from the phone: the installed `versionName` (so the
@@ -261,6 +264,26 @@ into a hub config. It never removes a package, wipes data or restarts a phone,
 and it is scanned for exactly that.
 
 Full guide: **`docs/PROVISION.md`**.
+
+## Doctor — why Android stops the server
+
+**Menu → Doctor** answers the question the dashboard cannot: *why*. It measures
+the battery exemption, background restriction, standby bucket, notification
+state, free space and the platform's own exit reason, and it reports `unknown`
+in words where Android does not answer. A lamp is green only for a value the
+phone actually returned, and the headline cannot say "all pass" while one row is
+unmeasured.
+
+It changes nothing on its own: the one system change it can *request* is
+Android's own battery-exemption dialog. The deeper facts — the Doze whitelist,
+the phantom-process limit, app-ops — are shown as commands you run on a computer,
+because an app cannot read them and Grom will not grow a shell to try.
+
+`tools/grom-provision doctor` reads those same facts over `adb`; its `--fix`
+covers exactly two of them (the Doze whitelist and, on API 28 and older, the
+legacy Wi-Fi sleep policy).
+
+Full guide: **`docs/DOCTOR.md`**.
 
 ## Embedding Grom in your app
 

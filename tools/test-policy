@@ -3,10 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D79 and S1-R002…S1-R044,
-# S5-R001…S5-R049.
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D84 and S1-R002…S1-R045,
+# S5-R001…S5-R053.
 #
-# The gate is intentionally a fixed count: "42/42" is the number of passes.
+# The gate is intentionally a fixed count: "47/47" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -94,9 +94,9 @@ check "boot restart is opt-in" \
 check "boot respects quarantine" \
   grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
 
-# 15. every IPC transaction checks signatures (API 7 has 37 transactions)
+# 15. every IPC transaction checks signatures (API 8 has 38 transactions)
 check "every IPC transaction applies the signature gate" \
-  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 37 ]"
+  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 38 ]"
 
 # 16. cleartext outbound traffic is not enabled
 check "no usesCleartextTraffic" \
@@ -242,6 +242,38 @@ check "the hub roster carries no address or key" \
 #     the guard inside it can only ever describe what the tool actually ran.
 check "the provisioning tool destroys nothing and never uses a shell" \
   bash -c "grep -q 'ProcessBuilder' tools/provision/GromProvision.java && ! grep -qE 'Runtime\.getRuntime|\"sh\", *\"-c\"' tools/provision/GromProvision.java && ! grep -qE 'uninstall|pm clear|reboot|kill|force-stop|format-userdata' tools/provision/GromProvision.java && grep -q 'INSTALL_TIMEOUT_MS' tools/provision/GromProvision.java"
+
+# 43. the Doctor has exactly one thin Android adapter (D80). Everything that
+#     decides -- thresholds, exit-reason levels, the verdict -- is pure Kotlin, so
+#     it is JVM-tested; a second file with a platform import would move a decision
+#     into a layer no unit test can reach.
+check "doctor has exactly one Android adapter" \
+  bash -c "[ \$(grep -rl 'import android\.' $MAIN/doctor --include='*.kt' | wc -l) -eq 1 ] && grep -q 'import android\.' $MAIN/doctor/AndroidDoctorProbe.kt && ! grep -q 'import android\.' $MAIN/doctor/DoctorRules.kt && ! grep -q 'import android\.' $MAIN/doctor/DoctorFacts.kt && ! grep -q 'import android\.' $MAIN/doctor/DoctorFacade.kt && ! grep -q 'import android\.' $MAIN/doctor/DoctorDocument.kt && ! grep -q 'import android\.' $MAIN/doctor/RunMarkerStore.kt"
+
+# 44. the Doctor never shells out (D80, D81). The deeper system facts -- the Doze
+#     whitelist, the phantom-process limit, app-ops -- are read by the operator
+#     over adb, so no shell, no dumpsys and no exec may exist in this package.
+check "doctor never shells out" \
+  bash -c "! grep -rnE 'ProcessBuilder|Runtime\.getRuntime|\.exec\(|/system/bin|"sh",|dumpsys|logcat' $MAIN/doctor --include='*.kt'"
+
+# 45. the Doctor has no background loop (D80). It measures when the operator
+#     opens the screen or taps the button; a timer here would be a battery cost
+#     nobody asked for and a second, silent poll beside the request path.
+check "doctor has no scheduler and no receiver" \
+  bash -c "! grep -rnE 'ScheduledExecutorService|scheduleAtFixedRate|scheduleWithFixedDelay|Executors\.newScheduled|java\.util\.Timer|postDelayed|BroadcastReceiver' $MAIN/doctor --include='*.kt'"
+
+# 46. the Doctor permission budget (D82). Two normal permissions, and no
+#     blanket package, usage-stats or overlay permission anywhere in the tree;
+#     the one-tap exemption dialog may only be requested when the permission that
+#     authorises it is declared.
+check "doctor permissions stay inside the agreed budget" \
+  bash -c "grep -q 'ACCESS_NETWORK_STATE' $MANIFEST_ENGINE && grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' $MANIFEST_ENGINE && ! grep -rqE 'QUERY_ALL_PACKAGES|PACKAGE_USAGE_STATS|SYSTEM_ALERT_WINDOW' $MANIFEST_ENGINE $MANIFEST_MAIN $MANIFEST_SERVER && grep -q 'ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' $APP_MAIN/GromActivity.kt && grep -q 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS' $MANIFEST_ENGINE"
+
+# 47. the Doctor stays local apart from three booleans (D84). The status block is
+#     an allow-list, and neither the status document nor the config export may
+#     grow a Doctor section.
+check "the doctor block is three fields and stays out of the exports" \
+  bash -c "grep -q 'DOCTOR_STATUS_FIELDS\|statusBlock(' $MAIN/doctor/DoctorDocument.kt && ! grep -q 'batteryExempt' $MAIN/superserver/ConfigExport.kt $MAIN/superserver/SuperStatusDocument.kt $MAIN/cluster/FleetStatus.kt && ! grep -q '\"doctor\"' $MAIN/superserver/ConfigExport.kt $MAIN/superserver/SuperStatusDocument.kt && grep -q '\"doctor\" to doctor()' $MAIN/superserver/SuperServerHost.kt"
 
 echo
 TOTAL=$((PASS + FAIL))

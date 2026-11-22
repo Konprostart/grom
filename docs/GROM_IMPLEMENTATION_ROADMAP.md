@@ -18,6 +18,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1F — identity, pairing, fleet (Phase B)** | **done (code)** | `engine/.../cluster/`, API 6, scoped peers, Devices section; `docs/CLUSTER.md`; D70–D75 |
 | **1G — VPS hub and inbound-only trust (Phase C)** | **done** | `tools/grom-hub` + `tools/hub/`, one-way scoped grant (API 7), unique forward ports, `SSH_FORWARD_REFUSED`; `docs/HUB.md`; D76–D78 |
 | **1H — provisioning from a computer** | **done** | `tools/grom-provision` + `tools/provision/`, `list`/`plan`/`apply`/`emit` over `adb`, battery exemption and one forward port per phone; `docs/PROVISION.md`; D79 |
+| **1I — Doctor diagnostics** | **done** | `engine/.../doctor/` (facts, rules, report, run marker, one Android probe), API 8, Doctor section in the menu, `doctor`/`--fix` in `tools/grom-provision`, three status booleans; `docs/DOCTOR.md`; D80–D84 |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -25,8 +26,8 @@ Task ids (`T-nn`) match §U of the master plan.
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.12.0` (versionCode 12). The eleven gates in `tools/run-gates` are
-the baseline; every phase below adds tests, not gates that replace them.
+Current version: `0.13.0` (versionCode 13). The twelve gates in `tools/run-gates`
+are the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
 task either consumes a validated manifest or is blocked on one existing.
@@ -496,7 +497,7 @@ owner — Grom keeps hosting its own Node/static apps (D79).
 | file | what it is |
 |---|---|
 | `tools/grom-provision` | launcher; requires a JDK 17 and `adb` |
-| `tools/provision/GromProvision.java` | `list` / `plan` / `apply` / `emit`, plus 76 in-process cases |
+| `tools/provision/GromProvision.java` | `list` / `plan` / `apply` / `emit` / `doctor`, plus 96 in-process cases |
 | `tools/test-provision` | the gate: runs the real tool against a fake `adb` |
 | `docs/PROVISION.md` | what it does, what it refuses to do, exit codes, limits |
 
@@ -513,6 +514,38 @@ execution in that tool), both flavours green, lint 0/0.
 
 Not closed by this phase: no physical phone was provisioned from this
 repository (B2); the tool does not configure the app (no `Public access`, no SSH
-target, no pairing) because those are per-device confirmations; it needs a USB
-cable; and it cannot explain *why* Android stopped a server — that is the next
-item, the Doctor screen.
+target, no pairing) because those are per-device confirmations; and it needs a USB
+cable. The follow-up item — explaining *why* Android stopped a server — is Phase
+1I below.
+
+### Phase 1I — Doctor diagnostics — **done**
+
+The second half of the agreed order: after provisioning a phone, explain why it
+keeps stopping. Nothing here changes a system setting on its own, runs a shell or
+polls in the background (D80).
+
+| file | what it is |
+|---|---|
+| `engine/.../doctor/DoctorFacts.kt` | the measurement, every field nullable |
+| `engine/.../doctor/DoctorRules.kt` | thresholds, exit-reason levels, the verdict — pure |
+| `engine/.../doctor/DoctorFacade.kt` | merges probe + engine status + run marker — pure |
+| `engine/.../doctor/DoctorDocument.kt` | the allow-listed document `/v1/status` and `doctorJson()` use |
+| `engine/.../doctor/RunMarkerStore.kt` | the one remembered fact, 4 KiB, atomic, corrupt ⇒ unknown |
+| `engine/.../doctor/AndroidDoctorProbe.kt` | the only file here that touches the platform |
+| `app/.../ui/DoctorModel.kt` | lamps, rows, fact formatting — pure `Lamp` mapping |
+| `tools/grom-provision doctor` | reads the facts an app cannot, `--fix` for two of them |
+
+What it settles, measured rather than assumed: whether the phone is exempt from
+Doze, whether background work is restricted, the standby bucket, whether the
+running notification is visible, the platform's own exit reason (API 30+), and
+whether the previous process ended without `onDestroy`. Three of those are also
+published in `/v1/status` so a hub can say *why* a phone is unreachable (D84).
+
+Gate: `tools/run-gates` **12/12**, policy **47/47** (#43 one Android adapter,
+#44 no shell, #45 no scheduler, #46 permission budget, #47 three status fields),
+engine **608** and app **62 + 62** JVM tests, `tools/test-provision` **96/96**,
+lint 0/0.
+
+Not closed by this phase: no physical phone was measured from this repository
+(B2); the Doctor raises the odds of surviving and explains a failure, it does not
+promise uptime; and force-stop remains unbeatable.
