@@ -218,6 +218,8 @@
     <string name="menu_access_sub">Bind, authentication and API keys</string>
     <string name="menu_runtime_sub">Agent, quarantine, token, start on boot</string>
     <string name="menu_update_sub">Check for a newer APK</string>
+    <string name="menu_invite_sub">Your invite code and rewards</string>
+    <string name="menu_help_sub">What Grom does, in plain language</string>
 
     <!-- External SSH servers (D58). -->
     <string name="ssh_add">Add server</string>

@@ -70,7 +70,6 @@ import app.grom.server.ui.label
 import app.grom.server.ui.lampView
 import app.grom.server.ui.pill
 import app.grom.server.ui.repaintLamp
-import app.grom.server.ui.sectionHeader
 import app.grom.server.ui.servingRow
 import app.grom.server.ui.shape
 import app.grom.server.ui.text
@@ -111,9 +110,6 @@ class GromActivity : Activity() {
 
     /** "Now serving" rows: id -> (lamp, value). */
     private val servingViews = LinkedHashMap<String, Pair<View, TextView>>()
-
-    private val sectionBodies = LinkedHashMap<String, LinearLayout>()
-    private val sectionChevrons = LinkedHashMap<String, TextView>()
 
     /**
      * Menu sections, built once and kept detached (D68). A section is
@@ -252,24 +248,12 @@ class GromActivity : Activity() {
         // Everything else lives in the header menu (D68). The panels are built
         // here, detached, so every renderer below keeps a live view from the
         // first refresh and an opened section is never stale.
+        //
+        // The invite card and the explanation are informational, so they open
+        // from the menu too (D69): the page itself holds only the server, never
+        // something that has to be scrolled past to reach the server state.
         buildSectionPanels()
 
-        // Bottom of the page: the invite code, then the explanation immediately
-        // after it, exactly where an operator looks for "what is this?" (D62).
-        column.addView(gap(14))
-        column.addView(
-            sectionCard("invite", R.string.invite_label, defaultOpen = false) {
-                buildInviteSection(it)
-            }
-        )
-        // Open on first run: the explanation is the point of the section, and it
-        // sits below everything else so it never pushes the dashboard down.
-        column.addView(gap(14))
-        column.addView(
-            sectionCard("help", R.string.ui_help, defaultOpen = true) {
-                buildHelpSection(it)
-            }
-        )
         column.addView(gap(24))
         column.addView(
             text(
@@ -418,41 +402,6 @@ class GromActivity : Activity() {
         return card
     }
 
-    /**
-     * A card whose header toggles its body. The open state is presentation-only
-     * and is restored from [GromPrefs].
-     */
-    private fun sectionCard(
-        key: String,
-        titleRes: Int,
-        defaultOpen: Boolean,
-        build: (LinearLayout) -> Unit
-    ): LinearLayout {
-        val card = card(palette)
-        val open = GromPrefs.sectionOpen(this, key, defaultOpen)
-        val (header, chevron) = sectionHeader(getString(titleRes), open, palette) {
-            toggleSection(key)
-        }
-        card.addView(header)
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = if (open) View.VISIBLE else View.GONE
-        }
-        card.addView(body)
-        sectionBodies[key] = body
-        sectionChevrons[key] = chevron
-        build(body)
-        return card
-    }
-
-    private fun toggleSection(key: String) {
-        val body = sectionBodies[key] ?: return
-        val open = body.visibility != View.VISIBLE
-        body.visibility = if (open) View.VISIBLE else View.GONE
-        sectionChevrons[key]?.text = if (open) "\u25BE" else "\u25B8"
-        GromPrefs.setSectionOpen(this, key, open)
-    }
-
     // ------------------------------------------------------- menu (D68)
 
     /**
@@ -463,6 +412,8 @@ class GromActivity : Activity() {
      */
     private fun buildSectionPanels() {
         panel(MenuModel.KEY_UPDATE) { buildUpdateSection(it) }
+        panel(MenuModel.KEY_INVITE) { buildInviteSection(it) }
+        panel(MenuModel.KEY_HELP) { buildHelpSection(it) }
         if (!BuildConfig.GROMSERVER) return
         panel(MenuModel.KEY_RUNTIME) { buildRuntimeSection(it) }
         panel(MenuModel.KEY_SSH) { buildSshSection(it) }

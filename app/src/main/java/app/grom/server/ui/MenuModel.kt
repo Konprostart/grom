@@ -13,10 +13,15 @@ import app.grom.server.R
  *
  * The order here is the order on screen and it is a product decision, not a
  * refactor: the things that cost money or break silently (a tunnel, a backend,
- * the apps that are actually served) come first; maintenance and updates come
- * last. `peripheral26` never binds a socket, so it only ever gets the update
- * entry — promising sections it does not have would be the same kind of lie
- * the "How Grom works" text exists to avoid (D62).
+ * the apps that are actually served) come first; maintenance, updates, the
+ * invite card and finally the explanation come last. The invite card and the
+ * "How Grom works" text are informational, so they sit at the very bottom of
+ * the menu and the page holds nothing but the server itself (D69).
+ *
+ * `peripheral26` never binds a socket, so it only ever gets the update entry
+ * plus the two informational ones — the invite card and the explanation exist
+ * in that build too. Promising sections it does not have would be the same
+ * kind of lie the "How Grom works" text exists to avoid (D62).
  *
  * Pure Kotlin, no `android.*`, no state: [MenuModelTest] can assert the order,
  * the keys and that every entry points at a real string (D30).
@@ -38,16 +43,21 @@ object MenuModel {
     const val KEY_ACCESS: String = "access"
     const val KEY_RUNTIME: String = "runtime"
     const val KEY_UPDATE: String = "update"
+    const val KEY_INVITE: String = "invite"
+    const val KEY_HELP: String = "help"
 
     /**
      * Ordered by what breaks first if it is ignored: the link to the outside,
      * the chain settings other software reads, the apps being served, the
-     * alerts, the public surface, supervision, then updates.
+     * alerts, the public surface, supervision, updates, and finally the two
+     * informational entries (invite, then the explanation).
      */
     fun entries(serverRole: Boolean): List<MenuEntry> {
         if (!serverRole) {
             return listOf(
-                MenuEntry(KEY_UPDATE, R.string.ui_update, R.string.menu_update_sub)
+                MenuEntry(KEY_UPDATE, R.string.ui_update, R.string.menu_update_sub),
+                MenuEntry(KEY_INVITE, R.string.invite_label, R.string.menu_invite_sub),
+                MenuEntry(KEY_HELP, R.string.ui_help, R.string.menu_help_sub)
             )
         }
         return listOf(
@@ -57,7 +67,9 @@ object MenuModel {
             MenuEntry(KEY_ALERTS, R.string.ui_alerts, R.string.menu_alerts_sub),
             MenuEntry(KEY_ACCESS, R.string.ui_public_access, R.string.menu_access_sub),
             MenuEntry(KEY_RUNTIME, R.string.ui_runtime_section, R.string.menu_runtime_sub),
-            MenuEntry(KEY_UPDATE, R.string.ui_update, R.string.menu_update_sub)
+            MenuEntry(KEY_UPDATE, R.string.ui_update, R.string.menu_update_sub),
+            MenuEntry(KEY_INVITE, R.string.invite_label, R.string.menu_invite_sub),
+            MenuEntry(KEY_HELP, R.string.ui_help, R.string.menu_help_sub)
         )
     }
 
@@ -73,6 +85,8 @@ object MenuModel {
         KEY_ACCESS -> R.string.ui_public_access
         KEY_RUNTIME -> R.string.ui_runtime_section
         KEY_UPDATE -> R.string.ui_update
+        KEY_INVITE -> R.string.invite_label
+        KEY_HELP -> R.string.ui_help
         else -> null
     }
 }

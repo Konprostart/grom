@@ -12,8 +12,8 @@ import app.grom.server.R
  * place and testable on the JVM — [HelpModelTest] asserts the block count, the
  * order and that no block smuggles in an address, a price or a balance.
  *
- * The section sits at the very bottom of the page, immediately after the invite
- * card, and answers, in plain language, one question per block:
+ * The section opens from the header menu (D69), last in the list, and answers,
+ * in plain language, one question per block:
  *   1. what Grom does at all;
  *   2. why most people need no rented server;
  *   3. when an external SSH server helps, and what it is for;

@@ -30,25 +30,26 @@ class MenuModelTest {
                 MenuModel.KEY_ALERTS,
                 MenuModel.KEY_ACCESS,
                 MenuModel.KEY_RUNTIME,
-                MenuModel.KEY_UPDATE
+                MenuModel.KEY_UPDATE,
+                MenuModel.KEY_INVITE,
+                MenuModel.KEY_HELP
             ),
             MenuModel.entries(serverRole = true).map { it.key }
         )
     }
 
     @Test
-    fun `a role without a server only offers the update`() {
+    fun `a role without a server only offers update, invite and help`() {
         // peripheral26 never binds a socket and has no tunnel, projects or
         // alerts; listing them would open empty dialogs and promise features
-        // that this build does not have.
+        // that this build does not have. The invite card and the explanation do
+        // exist there, so they stay (D69).
         assertEquals(
-            listOf(MenuModel.KEY_UPDATE),
+            listOf(MenuModel.KEY_UPDATE, MenuModel.KEY_INVITE, MenuModel.KEY_HELP),
             MenuModel.entries(serverRole = false).map { it.key }
         )
-        assertEquals(
-            MenuModel.entries(serverRole = true).last(),
-            MenuModel.entries(serverRole = false).single()
-        )
+        val full = MenuModel.entries(serverRole = true)
+        assertEquals(full.takeLast(3), MenuModel.entries(serverRole = false))
     }
 
     @Test
@@ -65,7 +66,7 @@ class MenuModelTest {
 
     @Test
     fun `an unknown key has no title`() {
-        assertNull(MenuModel.titleFor("invite"))
+        assertNull(MenuModel.titleFor("nope"))
         assertNull(MenuModel.titleFor(""))
         assertNull(MenuModel.titleFor("SSH"))
     }
@@ -82,7 +83,7 @@ class MenuModelTest {
             "ui_menu", "ui_menu_sections", "ui_close",
             "menu_ssh_sub", "menu_nostr_sub", "menu_projects_sub",
             "menu_alerts_sub", "menu_access_sub", "menu_runtime_sub",
-            "menu_update_sub"
+            "menu_update_sub", "menu_invite_sub", "menu_help_sub"
         ).forEach { name ->
             assertTrue("missing string: $name", names.contains(name))
         }
@@ -99,6 +100,8 @@ class MenuModelTest {
         assertEquals(R.string.ui_public_access, MenuModel.titleFor(MenuModel.KEY_ACCESS))
         assertEquals(R.string.ui_runtime_section, MenuModel.titleFor(MenuModel.KEY_RUNTIME))
         assertEquals(R.string.ui_update, MenuModel.titleFor(MenuModel.KEY_UPDATE))
+        assertEquals(R.string.invite_label, MenuModel.titleFor(MenuModel.KEY_INVITE))
+        assertEquals(R.string.ui_help, MenuModel.titleFor(MenuModel.KEY_HELP))
     }
 
     private fun stringsXml(): String? {

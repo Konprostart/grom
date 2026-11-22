@@ -166,39 +166,6 @@ internal fun Context.lampView(lamp: Lamp, palette: Palette): View = View(this).a
     }
 }
 
-/**
- * A collapsible section header. Returns the row and the chevron so the caller
- * can flip only the glyph on toggle instead of rebuilding the card.
- */
-internal fun Context.sectionHeader(
-    title: String,
-    expanded: Boolean,
-    palette: Palette,
-    onToggle: () -> Unit
-): Pair<LinearLayout, TextView> {
-    val chevron = text(
-        if (expanded) "\u25BE" else "\u25B8",
-        16f,
-        palette.muted,
-        gravity = Gravity.END
-    )
-    val row = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, dp(14), 0, dp(14))
-        isClickable = true
-        isFocusable = true
-        background = RippleDrawable(ColorStateList.valueOf(palette.ripple), null, null)
-        setOnClickListener { onToggle() }
-        addView(
-            label(title, palette),
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        )
-        addView(chevron)
-    }
-    return row to chevron
-}
-
 /** A compact "lamp · title · value" row used by the Now serving card. */
 internal fun Context.servingRow(
     title: String,
