@@ -14,6 +14,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1A — reference configuration** | **done** | `npub` (NIP-19), `relays` (reference only), `remoteBridge` (label/description), exposed in authenticated `/v1/status` and the sanitized Copy-config export; D52–D54 |
 | **1C — embeddable engine, dashboard, SSH bridge** | **done** | `engine/` library, `GromEmbed`, API 3, `projects/`, `ssh/`, `DashboardModel`, sections UI; D55–D60 |
 | **1D — integration ergonomics** | **done** | `ProjectNamespace` + API 4 `projectExec` (D61), `GromProject`, real heartbeat in `GromEmbed`, "How Grom works" section (D62), external Lightning node reference (D63), unlimited saved SSH servers (D64) |
+| **1E — fleet view (Phase A)** | **done** | `tools/grom-fleet` + `tools/fleet/`, read-only over the existing public data plane; `docs/FLEET.md`; `tools/test-fleet` |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -21,7 +22,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.7.0` (versionCode 7). The nine gates in `tools/run-gates` are
+Current version: `0.10.0` (versionCode 10). The ten gates in `tools/run-gates` are
 the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
@@ -174,7 +175,7 @@ Entry: Phase 1A green. Deliverables: T-01 … T-09.
 
 | gate item | command | pass condition |
 |---|---|---|
-| baseline | `tools/run-gates` | 9/9 |
+| baseline | `tools/run-gates` | 10/10 |
 | manifest | `AppManifestTest` | every refusal code in §G.3 exercised; one accept |
 | ports | `PortAllocatorTest` | allocate, release, collision, exhaustion, stable reuse |
 | releases | `ReleaseStoreTest` | pointer written last; retention never prunes `previous` |
@@ -193,7 +194,7 @@ Entry: 1B closed. Deliverables: T-10 … T-20, T-38.
 
 | gate item | command | pass condition |
 |---|---|---|
-| baseline | `tools/run-gates` | 9/9 |
+| baseline | `tools/run-gates` | 10/10 |
 | deploy transaction | `DeployIntegrationTest` | real sockets; failed gate does not move the pointer; a successful one moves it once |
 | local + HTTPS sources | `LocalSourceTest`, `HttpSourceTest` | traversal refused; redirects refused; `http://` refused |
 | Node runtime | `NodeRuntimeTest` | plan equals the current launch contract; agent suite unchanged |
@@ -214,7 +215,7 @@ Entry: Phase 2 code-complete. Deliverables: T-21 … T-26.
 
 | gate item | command | pass condition |
 |---|---|---|
-| baseline | `tools/run-gates` | 9/9 |
+| baseline | `tools/run-gates` | 10/10 |
 | binary runtime | `BinaryRuntimeTest` + device smoke | the mechanism works on hardware, or the adapter is withdrawn |
 | python spike | written result in `docs/RUNTIME.md` | either a runnable bionic CPython with `sqlite3` and `ssl`, or `[RESEARCH]` stays and nothing ships |
 | go/rust spike | written result | DNS and TLS roots resolved, or `[RESEARCH]` stays |
@@ -231,7 +232,7 @@ Entry: Phase 3 closed. Deliverables: T-27 … T-33.
 
 | gate item | command | pass condition |
 |---|---|---|
-| baseline | `tools/run-gates` | 9/9 |
+| baseline | `tools/run-gates` | 10/10 |
 | identity | `NodeIdentityTest` | deterministic `nodeId`; seed never leaves sealed storage |
 | pairing | `PairingTest` | no auto-approve; revocation effective on the next request; code single-use and expiring |
 | registry | `NodeRegistryTest` | stale after 45 s, unreachable after 120 s, never shown as live |
@@ -250,7 +251,7 @@ ran long).
 
 | gate item | command | pass condition |
 |---|---|---|
-| baseline | `tools/run-gates` | 9/9 |
+| baseline | `tools/run-gates` | 10/10 |
 | format | `BackupFormatTest` | AEAD, authenticated manifest, path escape refused |
 | round trip | `BackupRoundTripTest` | export → wipe → import → every entry verified |
 | restore report | `RestoreVerificationTest` | a failing app keeps its old directory and is reported |
@@ -265,7 +266,7 @@ Entry: Phase 5 closed. Deliverables: T-39 … T-42.
 
 | gate item | command | pass condition |
 |---|---|---|
-| baseline | `tools/run-gates` | 9/9 on the tagged commit |
+| baseline | `tools/run-gates` | 10/10 on the tagged commit |
 | release | `.github/workflows/release.yml` | both APKs, runtime inside, `apksigner verify` passes |
 | soak | `tools/soak` | 72 h with a written result (memory, restarts, chain integrity) |
 | device matrix | `docs/DEVICES.md` | §K rows replaced with measured ones |
@@ -373,6 +374,7 @@ tools/verify-ipc-signing                         # C-008, needs the three APKs
 tools/test-agent                                 # secrets over stdin, not argv
 tools/test-agent-runtime                         # agent protocol on the real Node
 tools/check-site                                 # the download page stays static
+tools/test-fleet                                 # tools/grom-fleet protocol tests
 gradle :app:lintServer29Debug :app:lintPeripheral26Debug
 ```
 
@@ -406,3 +408,32 @@ device.** The tests use a fake transport; the host half is code-reviewed only.
 Exit criteria for anything that depends on the VPS side: the operator's `Send
 test message` must return `ok` on a physical phone before an alert is trusted —
 recorded as a B2 item, not a JVM item.
+
+### Phase 1E — fleet view, Phase A — **done (code)**
+
+The smallest step toward several devices: an external, read-only view. It adds
+no identity, no pairing, no aggregation and **no change to Grom**.
+
+| file | what it is |
+|---|---|
+| `tools/grom-fleet` | launcher; requires only a JDK 17 |
+| `tools/fleet/GromFleet.java` | one file: config validation, password login, Ed25519 `grom-ed25519-v1` signing, a small JSON reader, table renderer |
+| `tools/fleet/fleet.example.json` | the documented config shape, with both auth modes |
+| `tools/test-fleet` | 18 protocol tests against a real loopback server |
+| `docs/FLEET.md` | setup, schema, lamp semantics, security notes |
+
+Why it is not in the app: `tools/test-policy` #17/#27 keep the compiled hosts and
+the socket surface fixed, and the fleet tool deliberately adds neither. It calls
+only `POST /v1/login`, `GET /v1/status` and `GET /v1/health` — the endpoints that
+already exist — and it is not part of any APK.
+
+Gate: `tools/run-gates` **10/10** (the fleet self-test is the new tenth gate),
+policy **33/33** unchanged, both flavours and lint unchanged.
+
+Not closed by this phase: nothing has been run against a physical phone from
+this repository (B2). The first real run is the operator's, with their own
+credentials.
+
+Next (needs its own decision before code): **Phase B — a per-device Ed25519
+identity, pairing and a paired peer roster**, which introduces the first
+device-to-device outbound relationship and therefore an amendment to S1-R003.

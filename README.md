@@ -135,16 +135,17 @@ gradle :app:assembleServer29Release :app:assemblePeripheral26Release
 ## Conformance
 
 ```bash
-tools/run-gates                           # all 9 gates, in order
+tools/run-gates                           # all 10 gates, in order
 gradle :engine:testDebugUnitTest          # engine: supervisor, HTTP, data plane, SSH
 gradle :app:testServer29DebugUnitTest     # app: dashboard projection, update check
 gradle :app:lint                          # lint, 0 errors required
 tools/check-third-party                   # dependency ledger matches the build
-tools/test-policy                         # 29 static invariants
+tools/test-policy                         # 33 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
 tools/test-agent-runtime                  # grom-agent.js protocol + degradation
 tools/check-site                          # download page: static, no third parties
 tools/verify-ipc-signing                  # C-008, needs the three APKs
+tools/test-fleet                          # tools/grom-fleet protocol tests
 ```
 
 `verify-ipc-signing` needs:
@@ -172,6 +173,27 @@ curl -s http://127.0.0.1:47001/grom/v1/health
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/status
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:47001/grom/v1/audit/verify
 ```
+
+## Fleet view (several devices, one table)
+
+`tools/grom-fleet` reads the public data plane of the Grom servers you run and
+prints one table with a lamp per device. It is read-only, needs only a JDK 17,
+and changes nothing in the app:
+
+```bash
+cp tools/fleet/fleet.example.json fleet.json   # then edit it
+tools/grom-fleet --config fleet.json
+tools/grom-fleet --config fleet.json --json | jq .
+tools/grom-fleet --config fleet.json --watch 30
+```
+
+A lamp is green only when the device answered **and** reported `running: true`;
+`stopped`, `refused` and `unreachable` are red, and a deliberately disabled
+public API is grey. A plaintext `password` field in the config is refused: the
+password comes from an environment variable or a file, and key auth signs each
+request locally with an Ed25519 key the phone never receives.
+
+Full setup, the config schema and the security notes: **`docs/FLEET.md`**.
 
 ## Embedding Grom in your app
 

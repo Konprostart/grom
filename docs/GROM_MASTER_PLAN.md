@@ -1449,7 +1449,7 @@ reference-only change is applied in place without rebuilding the listener
 release layout, health-gate arithmetic, adapter registry skeleton, child-process
 abstraction, scope model — all pure Kotlin, all JVM-tested.
 
-Gate: `tools/run-gates` 9/9, plus `AppManifestTest`, `PortAllocatorTest`,
+Gate: `tools/run-gates` 10/10, plus `AppManifestTest`, `PortAllocatorTest`,
 `HealthGateTest`, `ScopeTest`, plus new `tools/test-policy` invariants for the
 adapter/import rule (R6) and the scope check.
 
