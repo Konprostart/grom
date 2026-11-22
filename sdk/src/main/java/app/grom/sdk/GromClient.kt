@@ -126,8 +126,9 @@ class GromClient(
          * bridge (D55, D58); API 4 adds the project-scoped key/value path (D61);
          * API 5 adds the operator's notification settings (D65); API 6 adds the
          * device identity, mutual pairing and the fleet roster (D70-D75); API 7
-         * adds the one-way scoped grant for an inbound reader (D76-D78).
+         * adds the one-way scoped grant for an inbound reader (D76-D78); API 8
+         * adds the measured Doctor report (D80-D84).
          */
-        const val API_VERSION: Int = 7
+        const val API_VERSION: Int = 8
     }
 }

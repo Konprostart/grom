@@ -183,4 +183,13 @@ interface IGromServer {
      * stays a scope-limited peer, never an operator.
      */
     String peerGrantJson(String json);
+
+    // ---------------------------------------------------- API 8 (D80-D84)
+
+    /**
+     * One measured Doctor report: verdict, per-check level and code, and the
+     * facts behind them. Read-only; it changes nothing on the device and never
+     * contains a token, a chat id, an SSH host or a peer address (D80).
+     */
+    String doctorJson();
 }

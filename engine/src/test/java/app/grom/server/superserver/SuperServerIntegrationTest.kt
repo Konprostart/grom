@@ -138,6 +138,60 @@ class SuperServerIntegrationTest {
         assertFalse("a chat id must never reach the data plane", status.body.contains("chatId"))
     }
 
+    /**
+     * D84: three measured booleans in the authenticated status, nothing in health.
+     *
+     * The block is deliberately tiny, so this asserts both halves — that it is
+     * carried and that it is exactly the agreed three fields, with no exit
+     * history, text or device detail riding along.
+     */
+    @Test
+    fun theStatusCarriesOnlyThreeDoctorFieldsAndHealthCarriesNone() {
+        val harness = start(
+            serverStatus = {
+                mapOf(
+                    "address" to "not bound",
+                    "doctor" to app.grom.server.doctor.DoctorDocument.statusBlock(
+                        app.grom.server.doctor.DoctorFacts(
+                            batteryExempt = false,
+                            backgroundRestricted = true,
+                            lastUnexpectedStopMs = 1_700_000_000_000L
+                        )
+                    )
+                )
+            }
+        )
+        val health = harness.request("GET", "/v1/health")
+        assertEquals(200, health.status)
+        assertFalse(
+            "the unauthenticated health document must not carry diagnostics",
+            health.body.contains("doctor")
+        )
+
+        val login = harness.request(
+            "POST", "/v1/auth/login",
+            body = """{"password":"${harness.password}"}"""
+        )
+        val token = login.json()["token"] as String
+        val status = harness.request(
+            "GET", "/v1/status",
+            mapOf("Authorization" to "Bearer $token")
+        )
+        assertEquals(200, status.status)
+        val block = status.json()["doctor"] as Map<*, *>
+        assertEquals(
+            setOf("batteryExempt", "backgroundRestricted", "lastUnexpectedStopMs"),
+            block.keys
+        )
+        assertEquals(false, block["batteryExempt"])
+        assertEquals(true, block["backgroundRestricted"])
+        assertEquals(1_700_000_000_000L, block["lastUnexpectedStopMs"])
+        // No free text, no history, no device fingerprint.
+        for (banned in listOf("lastExit", "thermal", "availableMem", "network", "sdkInt")) {
+            assertFalse("the status block must not carry $banned", status.body.contains(banned))
+        }
+    }
+
     @Test
     fun wrongPasswordIsRejectedWithoutDistinguishing() {
         val harness = start()

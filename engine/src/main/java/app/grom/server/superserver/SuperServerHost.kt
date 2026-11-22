@@ -56,6 +56,12 @@ class SuperServerHost(
     private val principalOf: (String) -> SuperAuth.Principal = { SuperAuth.Principal.Operator },
     /** Paired-device public keys, read live so a pairing needs no restart (D54). */
     private val peerKeys: () -> Map<String, ByteArray> = { emptyMap() },
+    /**
+     * The three measured Doctor fields, and only those (D84): a hub polling
+     * status learns whether Android is throttling this phone, never what the
+     * phone is doing, where it is or what it is paired with.
+     */
+    private val doctor: () -> Map<String, Any?> = { emptyMap() },
     /** The sanitised hand-off document served at `GET /v1/config` (D53). */
     private val configExport: () -> String = { "{}" }
 ) {
@@ -296,7 +302,10 @@ class SuperServerHost(
                         "maxSseClients" to config.maxSseClients
                     ),
                     "agent" to agentHealth(),
-                    "streams" to bus.subscriberCount()
+                    "streams" to bus.subscriberCount(),
+                    // Read at call time, so the block is a measurement of this
+                    // request and never a value cached at start (D80, D84).
+                    "doctor" to doctor()
                 )
             }
         )

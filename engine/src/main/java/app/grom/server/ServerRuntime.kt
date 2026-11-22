@@ -22,6 +22,10 @@ import app.grom.server.core.Redactor
 import app.grom.server.core.SuperBindPolicy
 import app.grom.server.core.SupervisorPolicy
 import app.grom.server.core.Token
+import app.grom.server.doctor.AndroidDoctorProbe
+import app.grom.server.doctor.DoctorFacade
+import app.grom.server.doctor.DoctorDocument
+import app.grom.server.doctor.RunMarkerStore
 import app.grom.server.http.ApiException
 import app.grom.server.http.GromApi
 import app.grom.server.http.HttpResponse
@@ -117,6 +121,16 @@ class ServerRuntime(
         logger = { line -> log(line) }
     )
     private val auditStore = AuditStore(File(rootDir, "audit"))
+
+    /**
+     * The Doctor (D80-D84). The marker is the one fact Grom remembers, written
+     * once on start and once on stop; the probe is built lazily so a runtime
+     * that never opens the screen never touches the platform.
+     */
+    private val runMarker = RunMarkerStore(File(rootDir, RunMarkerStore.FILE_NAME))
+    private val doctorProbe: AndroidDoctorProbe by lazy {
+        AndroidDoctorProbe(context, logSink = logSink)
+    }
     private val policy = SupervisorPolicy()
     private val agentClient = AgentClient()
     private val scheduler: ScheduledExecutorService =
@@ -172,6 +186,7 @@ class ServerRuntime(
             pairing = fleet.pairing,
             principalOf = { keyId -> fleet.principalOf(keyId) },
             peerKeys = { fleet.peerKeys() },
+            doctor = { doctorStatusBlock() },
             configExport = { configExportJson() }
         )
     }
@@ -761,6 +776,47 @@ class ServerRuntime(
     }
 
     fun peerRefreshJson(): String = fleet.refreshJson()
+
+    // ------------------------------------------------------ Doctor (D80-D84)
+
+    /**
+     * The run marker is written by the service, not by the runtime: `onCreate`
+     * and `onDestroy` are the only two places that know a session began or ended
+     * cleanly, and neither is a timer (D80, D83).
+     */
+    fun beginRunSession(nowMs: Long = System.currentTimeMillis()): Unit {
+        runMarker.beginSession(nowMs)
+    }
+
+    fun endRunSession(nowMs: Long = System.currentTimeMillis()) {
+        runMarker.endSessionCleanly(nowMs)
+    }
+
+    /**
+     * A full measurement: the platform facts, the engine's own status and the
+     * marker, merged and judged by [DoctorFacade]. Synchronous and cheap; the UI
+     * calls it on a worker thread because of the binder calls, not the cost.
+     */
+    fun doctorJson(): String {
+        val report = DoctorFacade.measure(
+            probe = doctorProbe.facts(),
+            status = if (running) status() else null,
+            marker = runMarker.current()
+        )
+        return DoctorDocument.json(report)
+    }
+
+    /**
+     * The three fields `/v1/status` may carry (D84). Deliberately narrow: a hub
+     * polling status learns *why* a phone is being throttled, not what the phone
+     * is doing. Nothing free-text, no exit history, no addresses.
+     */
+    fun doctorStatusBlock(): Map<String, Any?> = DoctorDocument.statusBlock(
+        DoctorFacade.facts(
+            probe = doctorProbe.policyFacts(),
+            marker = runMarker.current()
+        )
+    )
 
     // --------------------------------------------------- Lightning probe (D52)
 
