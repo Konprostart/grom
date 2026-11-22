@@ -1560,8 +1560,11 @@ Numbered, file-level, in dependency order. "Gate" names the check that proves it
 > T-28 are implemented, plus the scoped peer client and the Devices section.
 > **Phase C is delivered as Phase 1G** (D76–D78): the VPS hub (`tools/grom-hub`),
 > a one-way scoped grant for an inbound reader, unique forward ports and
-> `SSH_FORWARD_REFUSED`. Deliberately **not** implemented: discovery, a
-> heartbeat endpoint, placement and a phone-side roster (C3). Those stay here.
+> `SSH_FORWARD_REFUSED`. Phone setup from a computer is Phase 1H
+> (`tools/grom-provision`, D79) — it installs the signed APK, asks for the
+> battery exemption and assigns the forward port, and it destroys nothing on the
+> device. Deliberately **not** implemented: discovery, a heartbeat endpoint,
+> placement and a phone-side roster (C3). Those stay here.
 
 | # | task | files | gate |
 |---|---|---|---|

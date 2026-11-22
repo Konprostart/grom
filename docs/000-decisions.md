@@ -1194,3 +1194,28 @@ not create.
 
 *Enforced by:* `SshTargetStoreTest`, `SshTunnelManagerTest`, `tools/test-hub`,
 `tools/test-policy` #38/#39.
+
+## D79 — provisioning is an operator tool outside the APK, and it destroys nothing
+**ACCEPTED.** Preparing several phones runs through `tools/grom-provision`,
+which drives `adb` from the computer. It is never bundled into the APK, the app
+never depends on it, and `adb` is never a runtime requirement of Grom. The tool
+may only read a phone, install the APK the operator names, and ask for a battery
+exemption; it MUST NOT remove packages, wipe data, restart a phone or terminate
+a process, and it MUST talk to adb through an argument list rather than a shell
+string. Anything that fails must be reported with a stable code and a hint,
+never assumed to have worked.
+
+*Why:* the fastest way to make "install Grom on ten phones" pleasant is also the
+fastest way to add a remote wipe primitive to a project that promises it has
+none. Installing and exempting are setup; deleting and wiping are the operator's
+actions, taken on the phone, with the phone in hand. The tool also keeps the
+project's promise that the security model is unchanged by convenience tooling:
+it uses the same signed APK and the same public data plane.
+
+*Scope kept out on purpose:* it does not configure the app (no `Public access`,
+no SSH targets, no pairing), because those are per-device decisions with their
+own UI confirmations, and it emits only `hub.json` — a `fleet.json` needs a LAN
+address the computer cannot know.
+
+*Enforced by:* `tools/test-provision` (76 cases incl. a recorded-invocation
+check and `VERIFY_FAILED` for an unconfirmed install), `tools/test-policy` #42.

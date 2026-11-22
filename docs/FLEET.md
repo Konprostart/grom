@@ -214,6 +214,10 @@ Devices section. The CLI stays useful because it needs nothing installed on a
 phone and works from a laptop. See [`CLUSTER.md`](CLUSTER.md) for the in-app flow
 and the security model.
 
+Setting a phone up (APK, battery exemption, its forward port) is done from the
+computer with [`PROVISION.md`](PROVISION.md)'s `tools/grom-provision`; its
+`emit --hub` writes the config that `grom-hub` reads below.
+
 **Phase C is now implemented as `tools/grom-hub`** (D76–D78): it reaches every
 phone through the reverse tunnel that already exists, so it works behind CGNAT,
 and it serves one loopback roster. A phone is admitted with a one-way scoped

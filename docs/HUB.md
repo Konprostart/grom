@@ -8,6 +8,10 @@ phone makes the outbound connection, it works behind CGNAT, on mobile data, and
 on a network that forbids incoming connections — with no LAN bind and no public
 port on the phone.
 
+To get a phone to this point — APK installed, battery exemption accepted, and
+its own forward port recorded — run `tools/grom-provision` on the computer and
+then `grom-provision emit --hub hub.json`; see [`PROVISION.md`](PROVISION.md).
+
 The hub is **not** part of Grom:
 
 * it is not in the APK and Grom never calls it;

@@ -23,7 +23,7 @@ grom/
 ├── testapps/               samecert / foreigncert — the C-008 evidence
 ├── web/                    the static download page (GitHub Pages, D49)
 ├── docs/                   000-decisions, specs S1–S5, F1 plan, master plan, roadmap, guides
-├── tools/                  policy, third-party, IPC-signing, agent and site gates
+├── tools/                  gates, plus grom-fleet, grom-hub and grom-provision
 ├── scripts/                test keys and the arm64 Node runtime pipeline
 ├── third_party/            the dependency ledger
 └── keys/                   TEST-ONLY signing material (see D4)
@@ -137,18 +137,19 @@ gradle :app:assembleServer29Release :app:assemblePeripheral26Release
 ## Conformance
 
 ```bash
-tools/run-gates                           # all 10 gates, in order
+tools/run-gates                           # all 12 gates, in order
 gradle :engine:testDebugUnitTest          # engine: supervisor, HTTP, data plane, SSH
 gradle :app:testServer29DebugUnitTest     # app: dashboard projection, update check
 gradle :app:lint                          # lint, 0 errors required
 tools/check-third-party                   # dependency ledger matches the build
-tools/test-policy                         # 41 static invariants
+tools/test-policy                         # 42 static invariants
 tools/test-agent                          # secrets go over stdin, not argv/env
 tools/test-agent-runtime                  # grom-agent.js protocol + degradation
 tools/check-site                          # download page: static, no third parties
 tools/verify-ipc-signing                  # C-008, needs the three APKs
 tools/test-fleet                          # tools/grom-fleet protocol tests
 tools/test-hub                            # tools/grom-hub protocol tests
+tools/test-provision                      # tools/grom-provision tests, no phone needed
 ```
 
 `verify-ipc-signing` needs:
@@ -239,6 +240,27 @@ carries a label, node id and measured state — never a port, address or key. If
 the hub is down, the phones keep working and only the roster is missing.
 
 Full guide: **`docs/HUB.md`**.
+
+## Preparing phones from a computer
+
+`tools/grom-provision` gets a phone from first plug-in to "running Grom with its
+own forward port", from the machine with the USB cable. It only reads the
+device, installs the APK you point it at, and asks for a battery exemption:
+
+```bash
+tools/grom-provision list                                    # what is connected
+tools/grom-provision plan  --apk grom-server29.apk           # what apply would do
+tools/grom-provision apply --apk grom-server29.apk --flavour server29
+tools/grom-provision emit  --hub hub.json                    # config for grom-hub
+```
+
+Every result is read back from the phone: the installed `versionName` (so the
+wrong role flavour is caught), the battery-whitelist entry (so a vendor that
+ignored the request is reported, not claimed), and the port that `emit` turns
+into a hub config. It never removes a package, wipes data or restarts a phone,
+and it is scanned for exactly that.
+
+Full guide: **`docs/PROVISION.md`**.
 
 ## Embedding Grom in your app
 

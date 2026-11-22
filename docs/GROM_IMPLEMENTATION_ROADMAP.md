@@ -17,6 +17,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1E — fleet view (Phase A)** | **done** | `tools/grom-fleet` + `tools/fleet/`, read-only over the existing public data plane; `docs/FLEET.md`; `tools/test-fleet` |
 | **1F — identity, pairing, fleet (Phase B)** | **done (code)** | `engine/.../cluster/`, API 6, scoped peers, Devices section; `docs/CLUSTER.md`; D70–D75 |
 | **1G — VPS hub and inbound-only trust (Phase C)** | **done** | `tools/grom-hub` + `tools/hub/`, one-way scoped grant (API 7), unique forward ports, `SSH_FORWARD_REFUSED`; `docs/HUB.md`; D76–D78 |
+| **1H — provisioning from a computer** | **done** | `tools/grom-provision` + `tools/provision/`, `list`/`plan`/`apply`/`emit` over `adb`, battery exemption and one forward port per phone; `docs/PROVISION.md`; D79 |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -377,6 +378,8 @@ tools/test-agent                                 # secrets over stdin, not argv
 tools/test-agent-runtime                         # agent protocol on the real Node
 tools/check-site                                 # the download page stays static
 tools/test-fleet                                 # tools/grom-fleet protocol tests
+tools/test-hub                                   # tools/grom-hub roster tests
+tools/test-provision                             # tools/grom-provision tests (no phone)
 gradle :app:lintServer29Debug :app:lintPeripheral26Debug
 ```
 
@@ -482,3 +485,34 @@ Not closed by this phase: nothing has been run against a physical phone (B2) or
 a real VPS from this repository; there is no phone-side roster (C3, deliberately
 deferred); the hub is a single point of *observation*, not of operation; and a
 phone that is off produces no message and no row update.
+
+### Phase 1H — provisioning from a computer — **done**
+
+Follows the review of comparable projects (MDMesh, phoneborg, phonenode, hmdm)
+and the agreed order: provisioning first, the "Doctor" diagnostics second.
+Nothing here installs other applications' APKs and nothing becomes a device
+owner — Grom keeps hosting its own Node/static apps (D79).
+
+| file | what it is |
+|---|---|
+| `tools/grom-provision` | launcher; requires a JDK 17 and `adb` |
+| `tools/provision/GromProvision.java` | `list` / `plan` / `apply` / `emit`, plus 76 in-process cases |
+| `tools/test-provision` | the gate: runs the real tool against a fake `adb` |
+| `docs/PROVISION.md` | what it does, what it refuses to do, exit codes, limits |
+
+What it settles, measured from the device rather than assumed: the installed
+`versionName` (so a blank phone shows `-`), the battery-exemption state (so a
+vendor that ignored the request is `partial`, not "done"), the arm64 runtime
+requirement (`no-arm64` before an install that would fail later), and the
+forward port each phone owns (41001–41099, fed to `tools/grom-hub` through
+`emit`).
+
+Gate: `tools/run-gates` **12/12** (the provisioning self-test is the new twelfth
+gate), policy **42/42** (#42 bans destructive commands and shell-string
+execution in that tool), both flavours green, lint 0/0.
+
+Not closed by this phase: no physical phone was provisioned from this
+repository (B2); the tool does not configure the app (no `Public access`, no SSH
+target, no pairing) because those are per-device confirmations; it needs a USB
+cable; and it cannot explain *why* Android stopped a server — that is the next
+item, the Doctor screen.
