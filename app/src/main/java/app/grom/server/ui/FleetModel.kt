@@ -54,4 +54,12 @@ object FleetModel {
             ?: emptyList()
         return if (scopes.isEmpty()) "" else scopes.joinToString(", ")
     }
+
+    /**
+     * A one-way grant (D77) has no address, so this device never dials it. The
+     * row says so instead of showing an empty "Address:" line, and the lamp
+     * stays grey: nothing was measured.
+     */
+    fun isInboundOnly(peer: Map<*, *>?): Boolean =
+        (peer?.get("address") as? String).isNullOrEmpty()
 }

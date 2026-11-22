@@ -441,4 +441,15 @@ Requested: %4$s</string>
     <string name="fleet_data_plane_off">Turn on Public access first: pairing needs the public API.</string>
     <string name="fleet_key_auth_required">Choose Key or Both authentication in Public access: paired devices sign their requests.</string>
     <string name="fleet_checking">Checking…</string>
+    <string name="fleet_grant">Trust a key</string>
+    <string name="fleet_grant_title">Trust a reader key</string>
+    <string name="fleet_grant_body">Paste the Ed25519 public key of a reader that only calls in, such as a hub on your VPS. It can read only what you select and can never start, stop or change anything here. Its key id is derived from the key, so it cannot claim another identity.</string>
+    <string name="fleet_grant_key">Public key (base64, 32 bytes)</string>
+    <string name="fleet_grant_label">Name (optional)</string>
+    <string name="fleet_grant_scope_status">Read status</string>
+    <string name="fleet_grant_scope_config">Read configuration</string>
+    <string name="fleet_grant_scope_required">Choose at least one scope.</string>
+    <string name="fleet_grant_key_required">Paste the reader public key.</string>
+    <string name="fleet_granted">Key trusted</string>
+    <string name="fleet_inbound_only">Only calls in · no address on this device</string>
 </resources>

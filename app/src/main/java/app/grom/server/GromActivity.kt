@@ -25,6 +25,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -730,6 +731,8 @@ class GromActivity : Activity() {
         body.addView(fleetList)
         body.addView(gap(12))
         body.addView(fleetButton(R.string.fleet_pair) { showPairPicker() })
+        body.addView(gap(6))
+        body.addView(fleetButton(R.string.fleet_grant) { showGrantDialog() })
         body.addView(gap(6))
         body.addView(fleetButton(R.string.fleet_refresh) { refreshFleet() })
         fleetDetail = text("", 11f, palette.muted)
@@ -1800,7 +1803,11 @@ class GromActivity : Activity() {
         )
         column.addView(
             text(
-                getString(R.string.fleet_address, (peer["address"] as? String).orEmpty()),
+                if ((peer["address"] as? String).isNullOrEmpty()) {
+                    getString(R.string.fleet_inbound_only)
+                } else {
+                    getString(R.string.fleet_address, (peer["address"] as? String).orEmpty())
+                },
                 11f,
                 palette.muted
             )
@@ -1920,6 +1927,78 @@ class GromActivity : Activity() {
                     refreshNow()
                 } catch (failure: Exception) {
                     toast(failure.message ?: getString(R.string.fleet_identity_reset_action))
+                }
+            }
+            .setNegativeButton(R.string.fleet_cancel, null)
+            .show()
+    }
+
+    /**
+     * One-way scoped trust (D77). The operator pastes a reader's public key and
+     * chooses what it may read; there is no code and no return address, so the
+     * key can only ever call in. The engine derives the key id, so a pasted key
+     * cannot claim to be a device that was paired before.
+     */
+    private fun showGrantDialog() {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val keyInput = EditText(this).apply {
+            hint = getString(R.string.fleet_grant_key)
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        }
+        val labelInput = EditText(this).apply {
+            hint = getString(R.string.fleet_grant_label)
+            setSingleLine()
+        }
+        val statusBox = CheckBox(this).apply {
+            setText(R.string.fleet_grant_scope_status)
+            isChecked = true
+        }
+        val configBox = CheckBox(this).apply {
+            setText(R.string.fleet_grant_scope_config)
+            isChecked = false
+        }
+        column.addView(keyInput)
+        column.addView(labelInput)
+        column.addView(statusBox)
+        column.addView(configBox)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.fleet_grant_title)
+            .setMessage(R.string.fleet_grant_body)
+            .setView(column)
+            .setPositiveButton(R.string.fleet_grant) { _, _ ->
+                val publicKey = keyInput.text.toString().trim()
+                if (publicKey.isEmpty()) {
+                    toast(getString(R.string.fleet_grant_key_required))
+                    return@setPositiveButton
+                }
+                val scopes = buildList {
+                    if (statusBox.isChecked) add("status.read")
+                    if (configBox.isChecked) add("config.read")
+                }
+                if (scopes.isEmpty()) {
+                    toast(getString(R.string.fleet_grant_scope_required))
+                    return@setPositiveButton
+                }
+                try {
+                    fleetDoc {
+                        it.peerGrantJson(
+                            Json.encode(
+                                mapOf(
+                                    "publicKey" to publicKey,
+                                    "label" to labelInput.text.toString().trim(),
+                                    "scopes" to scopes
+                                )
+                            )
+                        )
+                    }
+                    toast(getString(R.string.fleet_granted))
+                    refreshFleet()
+                } catch (failure: Exception) {
+                    toast(failure.message ?: getString(R.string.fleet_grant))
                 }
             }
             .setNegativeButton(R.string.fleet_cancel, null)
@@ -2105,8 +2184,14 @@ class GromActivity : Activity() {
             .ifEmpty { getString(R.string.fleet_none_scopes) }
         val message = buildString {
             append(FleetModel.fingerprint(nodeId)).append('\n')
-            append(getString(R.string.fleet_address, (peer["address"] as? String).orEmpty()))
-                .append('\n')
+            val address = peer["address"] as? String
+            append(
+                if (address.isNullOrEmpty()) {
+                    getString(R.string.fleet_inbound_only)
+                } else {
+                    getString(R.string.fleet_address, address)
+                }
+            ).append('\n')
             append(getString(R.string.fleet_scopes, scopes)).append('\n')
             append(getString(FleetModel.stateRes(peer["state"] as? String)))
             val error = peer["lastError"] as? String

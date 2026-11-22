@@ -69,4 +69,17 @@ class FleetModelTest {
         assertEquals("", FleetModel.scopesText(peer("alive").minus("grantedByMe")))
         assertEquals("", FleetModel.scopesText(null))
     }
+
+    @Test
+    fun `a one-way grant is marked as inbound and can never be green`() {
+        val inbound = peer("unknown").minus("address")
+        assertEquals(true, FleetModel.isInboundOnly(inbound))
+        assertEquals(false, FleetModel.isInboundOnly(peer("alive")))
+        assertEquals(true, FleetModel.isInboundOnly(null))
+
+        // A key that only calls in has nothing to probe, so the lamp stays grey
+        // even though the grant itself is valid (D77).
+        assertNotEquals(Lamp.ON, FleetModel.lampOf(inbound))
+        assertEquals(Lamp.UNKNOWN, FleetModel.lampOf(inbound))
+    }
 }
