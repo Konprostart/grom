@@ -6,13 +6,14 @@
 # See D1, D2, D5, D15, D18, D21, D39…D47, D52…D84 and S1-R002…S1-R045,
 # S5-R001…S5-R053.
 #
-# The gate is intentionally a fixed count: "47/47" is the number of passes.
+# The gate is intentionally a fixed count: "48/48" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
 MAIN="engine/src/main/java/app/grom/server"
 APP_MAIN="app/src/main/java/app/grom/server"
+AIDL="sdk/src/main/aidl/app/grom/sdk/ipc/IGromServer.aidl"
 MANIFEST_MAIN="app/src/main/AndroidManifest.xml"
 MANIFEST_SERVER="app/src/server29/AndroidManifest.xml"
 MANIFEST_ENGINE="engine/src/main/AndroidManifest.xml"
@@ -94,9 +95,13 @@ check "boot restart is opt-in" \
 check "boot respects quarantine" \
   grep -q 'isQuarantined' "$MAIN/ServerRuntime.kt"
 
-# 15. every IPC transaction checks signatures (API 8 has 38 transactions)
+# 15. every IPC transaction checks signatures. The number is not a magic
+#     constant: it must be exactly one gate per AIDL method, plus the gate's own
+#     definition. The previous `-ge 38` floor counted that definition too, so a
+#     new method shipped without its gate left the total unchanged and passed.
+#     Comparing against the AIDL itself makes an ungated method fail the gate.
 check "every IPC transaction applies the signature gate" \
-  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -ge 38 ]"
+  bash -c "[ \$(grep -c 'requireSameSigner()' $MAIN/service/GromService.kt) -eq \$(( \$(grep -cE '^[[:space:]]+(String|void|int) [a-zA-Z]+\(' $AIDL) + 1 )) ]"
 
 # 16. cleartext outbound traffic is not enabled
 check "no usesCleartextTraffic" \
@@ -274,6 +279,13 @@ check "doctor permissions stay inside the agreed budget" \
 #     grow a Doctor section.
 check "the doctor block is three fields and stays out of the exports" \
   bash -c "grep -q 'DOCTOR_STATUS_FIELDS\|statusBlock(' $MAIN/doctor/DoctorDocument.kt && ! grep -q 'batteryExempt' $MAIN/superserver/ConfigExport.kt $MAIN/superserver/SuperStatusDocument.kt $MAIN/cluster/FleetStatus.kt && ! grep -q '\"doctor\"' $MAIN/superserver/ConfigExport.kt $MAIN/superserver/SuperStatusDocument.kt && grep -q '\"doctor\" to doctor()' $MAIN/superserver/SuperServerHost.kt"
+
+# 48. the contract version has exactly one source (D29). `apiVersion()` answered
+#     3 while the contract said 5, and 7 while it said 8, because the runtime
+#     kept its own literal that nobody bumped. The runtime must therefore report
+#     the SDK constant and carry no numeric literal of its own.
+check "the runtime reports the SDK's API version, not its own literal" \
+  bash -c "grep -q 'override fun apiVersion(): Int = GromClient.API_VERSION' $MAIN/ServerRuntime.kt && ! grep -qE 'override fun apiVersion\(\): Int = [0-9]' $MAIN/ServerRuntime.kt && grep -q 'const val API_VERSION: Int = 8' sdk/src/main/java/app/grom/sdk/GromClient.kt"
 
 echo
 TOTAL=$((PASS + FAIL))

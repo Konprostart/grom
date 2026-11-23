@@ -541,9 +541,10 @@ running notification is visible, the platform's own exit reason (API 30+), and
 whether the previous process ended without `onDestroy`. Three of those are also
 published in `/v1/status` so a hub can say *why* a phone is unreachable (D84).
 
-Gate: `tools/run-gates` **12/12**, policy **47/47** (#43 one Android adapter,
-#44 no shell, #45 no scheduler, #46 permission budget, #47 three status fields),
-engine **608** and app **62 + 62** JVM tests, `tools/test-provision` **96/96**,
+Gate: `tools/run-gates` **12/12**, policy **48/48** (#43 one Android adapter,
+#44 no shell, #45 no scheduler, #46 permission budget, #47 three status fields,
+#48 the API version has one source),
+engine **610** and app **63 + 63** JVM tests, `tools/test-provision` **96/96**,
 lint 0/0.
 
 Not closed by this phase: no physical phone was measured from this repository
