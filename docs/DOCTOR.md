@@ -8,6 +8,12 @@ and what it is guessing.
 
 Open it from the menu: **Doctor**, just below *Runtime & supervision*.
 
+A host application that embeds the engine does not get this screen (D55 — the
+library draws no UI), but it gets the same measurements through
+`GromEmbed.health`, which projects them into a state, a headline code and at most
+four actions. The codes are the ones in `docs/TWO-IN-ONE.md` §9, so a host cannot
+paint a green lamp the Doctor would not paint.
+
 ## The rule the whole screen follows
 
 Every row is exactly one of these, and the three are never blended:

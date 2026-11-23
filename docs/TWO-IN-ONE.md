@@ -54,6 +54,144 @@ honesty:
    kill can stop the service; `force-stop` is not recoverable by any app. The
    Doctor section in the standalone app is the reference treatment of this.
 
+The three subsections below are the engine's contribution to that honesty, so a
+host does not have to build it from `statusJson` and Doctor codes by hand.
+
+### 2.1 Consent about specific text (D88)
+
+A boolean is not consent. If the host records `true` once and later changes what
+it starts — a data plane, another project, a rewritten notice — the old answer
+silently covers the new behaviour. Pass the version of the notice the operator
+actually read:
+
+```kotlin
+GromEmbed.recordConsent(context, noticeVersion = "3")   // after the dialog
+val result = GromEmbed.start(context, GromEmbed.Options(
+    projectId = "my-wallet", projectTitle = "My Wallet",
+    noticeVersion = "3",            // the text the operator is answering about
+    controlPort = GromEmbed.AUTO_PORT
+))
+when (result.reason) {
+    "CONSENT_REQUIRED" -> showNotice()              // nothing recorded yet
+    "CONSENT_OUTDATED" -> showNotice()              // the text changed; ask again
+}
+```
+
+`GromEmbed.consentRecord(context)` returns the recorded `(version, time)` so a
+host can say *what* the operator agreed to. A host that never versions its notice
+(`noticeVersion = ""`, the old `recordConsent(context, granted)`) keeps working
+exactly as before — and is asked once more the day it starts versioning, which is
+the point.
+
+**A notice you can copy.** The engine owns no wording (D55), so this is a
+template, not a constant — translate it, cut it down, but do not make it vaguer
+than what actually starts:
+
+> **Run a local server?**
+> This app can run a small server for its own features while it is open. It uses
+> a notification so Android does not stop it, and it needs to be exempt from
+> battery optimisation to keep running in the background. Nothing is reachable
+> from other devices unless you turn that on yourself, and it never connects to
+> an account or a cloud service. You can stop it at any time. Android may still
+> stop it (for example when the phone runs out of memory); a stopped server does
+> not delete your data.
+
+Bump `noticeVersion` whenever that text changes meaning, and pass the same string
+to `start`. Only the version and the timestamp are stored; the text never leaves
+the host.
+
+Nothing about this is transmitted: it is a `SharedPreferences` pair in the host's
+private storage.
+
+### 2.2 A port without thinking about ports (D89)
+
+Ports are an implementation detail an ordinary operator should never see. Pass
+`GromEmbed.AUTO_PORT` and the engine resolves one **before** the service starts:
+
+```kotlin
+val result = GromEmbed.start(context, GromEmbed.Options(
+    projectId = "my-wallet", projectTitle = "My Wallet",
+    controlPort = GromEmbed.AUTO_PORT
+))
+if (result.requested) show("Server started")       // result.port is the choice
+```
+
+* the range is `47100..47199`, deliberately away from the standalone app's
+  `47001` and the public data plane's `47002`;
+* a previously chosen port is **reused while it is still free**, so a tunnel
+  target or paired device that knows the port keeps working across restarts;
+* the chosen port is persisted and returned in `StartResult.port`;
+* a running listener is never relocated — `PORT_CHANGE_RESTART_REQUIRED` instead;
+* if the whole range is taken, the answer is `PORT_IN_USE`, not a silent move.
+
+This is opt-in: a host that does not ask for `AUTO_PORT` keeps exactly the
+behaviour D85 defined.
+
+### 2.3 Health the operator can understand (D90)
+
+`GromEmbed.health` runs the Doctor and projects it into a state, a headline code
+and at most four actions, so the host's screen is a small `when` and not a JSON
+parser plus a diagnosis:
+
+```kotlin
+GromEmbed.health(context) { health ->
+    when (health.state) {
+        EmbedState.RUNNING -> showGreen(health.headline)      // measured healthy
+        EmbedState.STARTING -> showSpinner(health.headline)
+        EmbedState.ATTENTION -> showYellow(health.headline, health.advice)
+        EmbedState.STOPPED -> showRed(health.headline, health.advice)
+        EmbedState.UNKNOWN -> showGrey(health.headline)       // say "not measured"
+    }
+    health.advice.forEach { advice ->
+        when (advice.action) {
+            EmbedAction.GRANT_CONSENT -> showNotice()
+            EmbedAction.OPEN_BATTERY_SETTINGS -> openBatterySettings()
+            EmbedAction.OPEN_NOTIFICATION_SETTINGS -> openNotificationSettings()
+            EmbedAction.OPEN_APP_SETTINGS -> openAppSettings()
+            EmbedAction.RESTART_SERVER -> { GromEmbed.stop(context); startAgain() }
+            EmbedAction.RETRY -> startAgain()
+            EmbedAction.NONE -> showExplanation(advice.code)  // nothing a button can fix
+        }
+    }
+}
+```
+
+Rules the projection keeps, because it is built from the Doctor's own rules and
+not from a second opinion:
+
+* **green means measured.** `EmbedState.RUNNING` is produced only by a report
+  where every row measured healthy; a `BAD` or an `unknown` row can never be
+  green (D80, D62);
+* **no advice for a choice.** The data plane being off, or no SSH target saved,
+  is a decision the operator made — `NOTICE`, never a to-do;
+* **no invented sentences.** The engine returns stable codes (table in §9); the
+  host owns the wording and the translation (D55);
+* **no server start.** The health check binds with `createIfMissing = false`, so
+  asking "is it running?" can never make it run.
+
+`GromEmbed.measureHealth(context)` is the blocking form for a background thread
+(at most a two-second Binder wait), and `GromEmbed.doctorReport(context)` returns
+the full report if the host wants to draw every row itself.
+
+The button under an advice item is one line, and the engine maps the action to
+the right platform screen so the host cannot open the wrong page:
+
+```kotlin
+EmbedSettings.intentFor(context, advice.action)?.let { intent ->
+    try { startActivity(intent) } catch (_: ActivityNotFoundException) { showPlainText(advice.code) }
+}
+```
+
+| action | screen |
+|---|---|
+| `OPEN_BATTERY_SETTINGS` | Android's list of apps exempt from battery optimisation |
+| `OPEN_NOTIFICATION_SETTINGS` | this app's notification settings |
+| `OPEN_APP_SETTINGS` | this app's own settings page (includes storage and cache) |
+| `GRANT_CONSENT`, `RESTART_SERVER`, `RETRY`, `NONE` | the host's own UI; `intentFor` returns `null` |
+
+Vendor ROMs do remove pages: always catch `ActivityNotFoundException` and say
+what the code means instead of crashing.
+
 ---
 
 ## 3. Build it
@@ -156,14 +294,15 @@ A port conflict is a **fact**, not a bug: `PORT_IN_USE` also appears as
 
 ```kotlin
 // In an Activity (or a user-initiated broadcast). NOT in Application.onCreate.
-if (!GromEmbed.consentGiven(this)) { showConsentDialog(); return }
-val result = GromEmbed.start(this, GromEmbed.Options(...))
+if (GromEmbed.consentRecord(this) == null) { showNotice(); return }
+val result = GromEmbed.start(this, GromEmbed.Options(..., noticeVersion = NOTICE))
 ```
 
 Android 12+ refuses `startForegroundService` from the background
 (`ForegroundServiceStartNotAllowedException`). `GromEmbed.start` catches it and
-returns `requested = false` with a `START_REFUSED:` reason, but the call should
-not be made from that position at all.
+returns `requested = false` with `FOREGROUND_START_NOT_ALLOWED` (or
+`START_REFUSED` for another refusal, named in `result.detail`), but the call
+should not be made from that position at all.
 
 **Boot.** The engine does not start itself on boot — that is a visible decision
 the host owns. A host that wants it declares `RECEIVE_BOOT_COMPLETED` and its own
@@ -303,10 +442,12 @@ with its own scopes. Both can be paired into the same roster.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `CONSENT_REQUIRED` | `start` before `recordConsent` | Show your consent dialog first. |
-| `PORT_IN_USE` | 47001 (or your chosen port) is held — usually the standalone Grom | Pick another port with `Options.controlPort`; do not reuse. |
-| `BAD_CONTROL_PORT` | Outside `1..65535` | Use a real port. |
+| `CONSENT_OUTDATED` | The host declared a notice version the operator never saw | Show the notice again, then `recordConsent(context, noticeVersion)`. |
+| `PORT_IN_USE` | 47001 (or your chosen port) is held — usually the standalone Grom | Use `Options.controlPort = GromEmbed.AUTO_PORT`, or pick another port. |
+| `BAD_CONTROL_PORT` | Outside `1..65535` | Use a real port, or `AUTO_PORT`. |
 | `PORT_CHANGE_RESTART_REQUIRED` | Port changed while the server runs | `GromEmbed.stop`, then `start`. |
-| `START_REFUSED: ForegroundServiceStartNotAllowedException` | Started from the background | Start from a visible Activity. |
+| `FOREGROUND_START_NOT_ALLOWED` | Started from the background (Android 12+) | Start from a visible Activity and offer a retry button. |
+| `START_REFUSED` | The platform refused the start for another reason | `result.detail` names the exception class; read the Doctor. |
 | Binder never connects | Service could not start | Read `lastError`/Doctor; a bind conflict now says `PORT_IN_USE` instead of a generic refusal. |
 | `MISSING_RUNTIME` in status | `libnode.so` not in the host's `jniLibs` | Run `scripts/build-node-android.sh --install-dir …` and rebuild. |
 | `ApiException` 400 on `superSaveConfig` | The document would be refused by the screen too | Fix the document; the code names the field (`BAD_KEY`, `CREDENTIAL_REQUIRED`, …). |
@@ -319,9 +460,11 @@ with its own scopes. Both can be paired into the same roster.
 - [ ] `include(":engine")` (and `:sdk`) and `implementation(project(":engine"))`.
 - [ ] `jniLibs` populated **or** a deliberate decision to run without the agent.
 - [ ] `jniLibs.useLegacyPackaging = true` in the host app.
-- [ ] `controlPort` chosen and persisted (`47101`, not `47001`).
-- [ ] Consent screen → `recordConsent` → `start` from an Activity.
-- [ ] UI reads `status()` and shows `state`, `lastError` and the Doctor report.
+- [ ] `controlPort = GromEmbed.AUTO_PORT` (or an explicit `47101`, not `47001`).
+- [ ] Consent screen → `recordConsent(context, noticeVersion)` → `start` from an
+      Activity, with `Options.noticeVersion` set to the same version.
+- [ ] UI renders `GromEmbed.health` (`state`, `headline`, `advice`) instead of
+      parsing `statusJson` and inventing sentences.
 - [ ] Public data plane stays **off** until the operator turns it on; configured
       only through `superSaveConfig` (API 9, checked with `apiVersion() >= 9`).
 - [ ] Battery exemption offered with Android's own dialog; boot opt-in explained.
@@ -329,9 +472,65 @@ with its own scopes. Both can be paired into the same roster.
 - [ ] The operator has been told: no uptime guarantee, no cloud account, no
       shared disk, and what "pair a device" means if you expose one.
 
+
 ---
 
-## 9. Where this is enforced
+## 9. Stable codes
+
+Everything the embed layer can return, so a host can `when` over it and own the
+wording. The codes are part of the contract: a new one is added by a decision and
+documented here first (`tools/test-policy` #54 fails if this table drifts).
+
+### 9.1 `StartResult.reason` — the start did not happen
+
+| Code | Meaning | Action |
+|---|---|---|
+| `CONSENT_REQUIRED` | nothing was recorded | `EmbedAction.GRANT_CONSENT` |
+| `CONSENT_OUTDATED` | recorded for different notice text (D88) | `EmbedAction.GRANT_CONSENT` |
+| `PORT_IN_USE` | the resolved port is held | `EmbedAction.RETRY` with `AUTO_PORT` |
+| `BAD_CONTROL_PORT` | outside `1..65535` | `EmbedAction.RETRY` |
+| `PORT_CHANGE_RESTART_REQUIRED` | a running listener cannot move (D85) | `EmbedAction.RESTART_SERVER` |
+| `FOREGROUND_START_NOT_ALLOWED` | Android 12+ refused a background start | `EmbedAction.RETRY` from a visible Activity |
+| `START_REFUSED` | anything else; `result.detail` has the class name | `EmbedAction.RETRY` |
+
+### 9.2 `EmbedHealth.headline` — what the measurement says
+
+| Code | State | Meaning |
+|---|---|---|
+| `SERVER_RUNNING` | `RUNNING` | every row measured healthy — the only green |
+| `SERVER_STARTING` | `STARTING` | the process is coming up; nothing proven yet |
+| `SERVER_STOPPED` | `STOPPED` | not running; the last end was clean or unknown |
+| `SERVER_DIED` | `STOPPED` | the previous process ended without `onDestroy` (D83) |
+| `SERVER_QUARANTINED` | `STOPPED` | the supervisor stopped restarting a crashing agent |
+| `RUNTIME_MISSING` | `STOPPED` | no arm64 Node runtime in this APK; the server still serves |
+| `NEEDS_ATTENTION` | `ATTENTION` | a measured value explains why it may stop |
+| `PARTLY_UNKNOWN` | `UNKNOWN` | something was not measured; not health |
+
+A process whose status document names a state these rules do not recognise
+(`PROCESS_UNKNOWN_STATE`) is reported as `PARTLY_UNKNOWN`, never as
+`SERVER_STOPPED`: the server answered, so "stopped" would be a guess. The
+`PROCESS_NOT_RUNNING` case — no status at all — is the one that really is
+`SERVER_STOPPED`.
+
+### 9.3 `EmbedAdvice.code` — the Doctor's own codes, with an action
+
+| Code | `EmbedAction` |
+|---|---|
+| `BATTERY_OPTIMISED`, `STANDBY_RARE`, `STANDBY_RESTRICTED`, `STANDBY_NEVER` | `OPEN_BATTERY_SETTINGS` |
+| `EXIT_LOW_MEMORY`, `EXIT_SIGNALED`, `EXIT_FREEZER`, `EXIT_EXCESSIVE_RESOURCE_USAGE` | `OPEN_BATTERY_SETTINGS` |
+| `NOTIFICATIONS_OFF` | `OPEN_NOTIFICATION_SETTINGS` |
+| `BACKGROUND_RESTRICTED`, `STORAGE_LOW` | `OPEN_APP_SETTINGS` |
+| `PROCESS_STOPPED`, `PROCESS_STOPPED_UNCLEAN`, `PROCESS_QUARANTINED`, `AGENT_CRASHING`, `DATA_PLANE_NOT_RUNNING` | `RESTART_SERVER` |
+| `EXIT_CRASH`, `EXIT_CRASH_NATIVE`, `EXIT_ANR`, `EXIT_UNRECORDED` | `RESTART_SERVER` |
+| `PROCESS_NO_RUNTIME`, `BRIDGE_NOT_CONNECTED`, anything new | `NONE` (nothing a button can fix) |
+
+Only a `BAD` row produces advice. A `NOTICE` — `DATA_PLANE_OFF`, `BRIDGE_NONE` —
+is a decision the operator made, and nagging about it would teach them to ignore
+the screen.
+
+---
+
+## 10. Where this is enforced
 
 | Rule | Enforced by |
 |---|---|
@@ -341,3 +540,10 @@ with its own scopes. Both can be paired into the same roster.
 | the peripheral role carries no runtime | `tools/check-flavours` (built APKs; the release workflow asserts it on the shipped ones), `tools/test-policy` #51 |
 | every IPC method passes the signature gate | `tools/test-policy` #15, `tools/verify-ipc-signing` |
 | no address or secret in a status document | `tools/test-policy` #24, #47; `ConfigExportTest` |
+| the embed layer stays pure and honest | `EmbedHealthTest`, `EmbedConsentTest`, `GromEmbedStartCodeTest`, `tools/test-policy` #52 |
+| consent covers specific notice text (D88) | `EmbedConsentTest`, `tools/test-policy` #53 |
+| an automatic port is resolved, persisted and returned (D89) | `ControlPortResolveTest`, `tools/test-policy` #53 |
+| every code in §9 is documented | `tools/test-policy` #54 |
+| a health check never starts the server | `GromClient.bind(createIfMissing = false)`, `GromEmbedStartCodeTest` |
+| advice opens the right system page | `EmbedSettingsTest` |
+| a dead registration is released | `GromClient.unbind()` after `onNullBinding`/`onBindingDied` (S4-R018) |

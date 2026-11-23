@@ -1397,3 +1397,66 @@ checkout builds both APKs without the runtime: `check-flavours` reports that
 explicitly instead of pretending to have checked the server half, and the
 release workflow — which installs the runtime — asserts that `server29` contains
 `libnode.so` and `peripheral26` contains no `lib/` entry at all.
+
+## D88 — consent is about a notice, not a flag
+**ACCEPTED.** `GromEmbed.recordConsent` used to store a boolean. A host could
+record "yes" once, then change what it starts — a data plane, another project, a
+rewritten dialog — and the old answer would silently authorise the new
+behaviour. The record is now `(noticeVersion, grantedAtMs)`, and `start` refuses
+with `CONSENT_OUTDATED` when the host declares a version the operator never saw.
+A `false` answer clears any previous consent, so "no" cannot be overwritten by an
+older "yes".
+
+The engine still owns no wording (D55): the host writes and localizes the notice
+and picks the version string; the engine stores the pair in the host's private
+preferences and compares it. A host that declares no version keeps the pre-D88
+behaviour, and is asked once more the day it starts versioning — which is the
+point of versioning it.
+
+*Why not a hash of the notice text:* a hash would have to be recomputed by the
+engine, which does not have the text, and would break on every
+translation change for a reason the operator cannot see.
+
+*Enforced by:* `EmbedConsentTest`, `tools/test-policy` #53.
+
+## D89 — an automatic control port is resolved, persisted and returned
+**ACCEPTED (extends D85).** D85 made the port the host's choice and forbade a
+silent fallback, because a server that relocates itself breaks the hub's tunnel
+target, a paired device and any CLI holding the old port. That rule stands. What
+was missing for a host that does not want to think about ports at all is an
+*explicit* automatic choice: `GromEmbed.AUTO_PORT` (`0`).
+
+`ControlPort.resolve` handles the whole matrix before the service starts, with
+the probe injected so every branch is a JVM test: a free `47100..47199` port is
+picked when nothing is stored, a previously chosen port is **reused while it is
+still free** (stability matters more than freshness), the standalone default
+`47001` is never reused for an automatic choice, a running listener is never
+relocated (`PORT_CHANGE_RESTART_REQUIRED`), and an exhausted range is
+`PORT_IN_USE`. The chosen port is persisted and returned in `StartResult.port`.
+
+*Why not silently retry in the service:* that is exactly the fallback D85
+forbids. The difference here is that the host asked for a choice and is told
+which one it got.
+
+*Enforced by:* `ControlPortResolveTest`, `tools/test-policy` #53.
+
+## D90 — the engine exposes health as codes and actions, never as sentences
+**ACCEPTED.** Embedding hosts were told to read `statusJson` *and* `doctorJson`
+and then invent the sentence for `BATTERY_OPTIMISED` — which is how a host ends up
+painting a green lamp over a report with a `BAD` row. `EmbedHealth.of(report)`
+projects the Doctor into `(state, headline, advice[])`, where every code is
+stable and every advice carries an `EmbedAction`. The projection is built from
+`DoctorRules`' own output, so it cannot disagree with the Doctor screen, and the
+mapping is pure Kotlin with no `android.*` import, so it is fully JVM-tested.
+
+Three rules are absolute: `RUNNING` is produced only by a fully measured healthy
+report; a `NOTICE` (the data plane deliberately off, no SSH target) never becomes
+a to-do; and `GromEmbed.measureHealth` binds with `createIfMissing = false`, so a
+health check can never start a server the operator did not ask for.
+
+The engine returns no user-visible text: the host owns wording and translations
+(D55). `docs/TWO-IN-ONE.md` §9 is the code table, and `tools/test-policy` #54
+fails when a code exists in the code but not in the guide.
+
+*Enforced by:* `EmbedHealthTest`, `GromEmbedStartCodeTest`, `tools/test-policy`
+#52, #54.

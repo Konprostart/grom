@@ -20,6 +20,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1H — provisioning from a computer** | **done** | `tools/grom-provision` + `tools/provision/`, `list`/`plan`/`apply`/`emit` over `adb`, battery exemption and one forward port per phone; `docs/PROVISION.md`; D79 |
 | **1I — Doctor diagnostics** | **done** | `engine/.../doctor/` (facts, rules, report, run marker, one Android probe), API 8, Doctor section in the menu, `doctor`/`--fix` in `tools/grom-provision`, three status booleans; `docs/DOCTOR.md`; D80–D84 |
 | **1J — "2 in 1": host-chosen control port, host-configured data plane, a lean peripheral** | **done** | `core/ControlPort` + `GromEmbed.Options.controlPort` (D85), `superSaveConfig` API 9 + `SuperServerConfigInput` (D86), peripheral `jniLibs` exclusion (D87), `docs/TWO-IN-ONE.md`; `tools/check-flavours` |
+| **1K — "2 in 1" without complications: versioned consent, an automatic port, host-readable health** | **done** | `EmbedConsent` (D88), `ControlPort.resolve` + `GromEmbed.AUTO_PORT` (D89), `EmbedHealth` projection + `GromEmbed.health` (D90), `GromClient.bind(createIfMissing=false)` and a released registration after `onNullBinding`; `docs/TWO-IN-ONE.md` §2, §9 |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -27,7 +28,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.14.0` (versionCode 14). The thirteen gates in `tools/run-gates`
+Current version: `0.15.0` (versionCode 15). The thirteen gates in `tools/run-gates`
 are the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
@@ -561,7 +562,7 @@ one app that has a server". Three pieces, each with a decision:
 |---|---|
 | **D85** | `core/ControlPort` + `GromEmbed.Options.controlPort`: the host chooses the loopback control port; a taken port is `PORT_IN_USE`, never a silent fallback and never a signature/network failure |
 | **D86** | `IGromServer.superSaveConfig` (API 9) + `SuperServerConfigInput`: a host configures the data plane with the screen's own validation, and `SuperServerHost` never binds a plane it was not asked to start |
-| **D87** | the peripheral flavour excludes `jniLibs`: 39 MB → 2.2 MB, because that role never executes the agent |
+| **D87** | the peripheral flavour excludes `jniLibs`: ~39 MB → ~1.6 MB release (~2.2 MB debug), because that role never executes the agent |
 
 `docs/TWO-IN-ONE.md` is the guide: modules, runtime, port, consent, foreground
 start, boot, battery, data plane, coexistence with a standalone Grom, and the
@@ -577,3 +578,31 @@ Not closed by this phase: no host application was built against this repository
 in CI (the two `testapps` only prove the signing gate); a companion-install model
 (two APKs, one flow) still needs a trust decision, because a third-party host
 cannot sign with Grom's key; and the runtime is still arm64-only.
+
+### Phase 1K — "2 in 1" without complications — **done**
+
+Phase 1J made the combination *possible*. This phase makes it *simple*, i.e.
+something a host can ship without re-implementing the engine's honesty rules:
+
+| decision | change |
+|---|---|
+| **D88** | consent records `(noticeVersion, time)`; a start that declares different text is `CONSENT_OUTDATED`, so an old "yes" cannot authorise new behaviour |
+| **D89** | `GromEmbed.AUTO_PORT`: the port is resolved before the start (`ControlPort.resolve`), reused while free, persisted and returned; a running listener never moves and nothing falls back silently |
+| **D90** | `EmbedHealth.of(report)` + `GromEmbed.health`: a state, a headline code and at most four `(code, EmbedAction)` pairs, projected from the Doctor's own rules; the engine returns codes, never sentences |
+
+Two defects found in the audit were fixed on the way: `GromClient` dropped a dead
+service registration without calling `unbindService` (a connection leak that also
+made every later `bind` a no-op), and `GromClient.bind` could not bind **without
+starting** the server, so a health check would have created the service it was
+asked to inspect.
+
+Gate: `tools/run-gates` **13/13**, policy **55/55** (#52 pure embed model, #53
+consent and port decisions, #54 every code documented, #55 the notification
+worker is closed), JVM tests **801** (engine **672**, sdk **3**, app **63 + 63**),
+of which `EmbedHealthTest` **18**, `EmbedConsentTest` **7**, `EmbedSettingsTest`
+**6**, `GromEmbedStartCodeTest` **3** and `ControlPortResolveTest` **13**, lint
+0/0.
+
+Not closed: the companion model (model B in `docs/TWO-IN-ONE.md`) is still out of
+scope — it needs a second trust relation, not code; and no host APK is built
+against the engine in CI.

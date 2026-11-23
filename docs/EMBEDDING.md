@@ -64,19 +64,31 @@ A server is a persistent process. The engine refuses to start without recorded
 consent, so the host must show its own explanation first:
 
 ```kotlin
-if (!GromEmbed.consentGiven(context)) {
+if (GromEmbed.consentRecord(context) == null) {
     showDialog(
         title = "Run a local server?",
         message = "This app can run Grom, a local server, while it is open. " +
                   "Nothing is exposed to the internet unless you enable it."
     ) { granted ->
-        GromEmbed.recordConsent(context, granted)
+        GromEmbed.recordConsent(context, noticeVersion = NOTICE, granted = granted)
     }
 }
 ```
 
-The consent flag lives in the host app's private preferences. It is not a server
+The consent record lives in the host app's private preferences. It is not a server
 setting and it is not transmitted anywhere.
+
+**Version the notice (D88).** Pass the same `noticeVersion` to `start`:
+
+```kotlin
+GromEmbed.start(context, GromEmbed.Options(projectId, title, noticeVersion = NOTICE))
+```
+
+If the operator answered about different text, `start` returns
+`CONSENT_OUTDATED` and the host shows the notice again. A host that never
+versions (`recordConsent(context, granted)` and no `noticeVersion`) keeps the old
+behaviour. `GromEmbed.consentRecord(context)` returns the stored
+`(noticeVersion, grantedAtMs)`.
 
 ---
 
@@ -92,14 +104,24 @@ val result = GromEmbed.start(
         capabilities = setOf("kv", "lightning.ref"),
         heartbeat = true,                  // repeat the announcement (default)
         heartbeatIntervalMs = 30_000,      // clamped to 5 s … 10 min
-        controlPort = 47_101               // D85: not the standalone app's 47001
+        controlPort = GromEmbed.AUTO_PORT, // D89: a free 47100..47199 port
+        noticeVersion = NOTICE             // D88: the text the operator saw
     )
 ) { registered ->                      // runs on a background thread
     if (!registered) Log.w("Grom", "project registration did not complete")
 }
 
-if (!result.requested) Log.e("Grom", "start refused: ${result.reason}")
+if (!result.requested) {
+    // result.reason is a stable code; §9 of TWO-IN-ONE.md maps it to an action.
+    Log.e("Grom", "start refused: ${result.reason} (${result.detail})")
+}
+// result.port is the port the server was asked to serve.
 ```
+
+`AUTO_PORT` is opt-in and never silent: the chosen port is persisted and returned,
+a previously chosen free port is reused, and a running listener is never moved
+(`PORT_CHANGE_RESTART_REQUIRED`). Use an explicit number (`47101`) instead if the
+host has its own configuration screen.
 
 `start` returns as soon as the platform accepts the foreground-service start.
 `requested = true` does **not** mean the agent is ready: the runtime may be
@@ -116,7 +138,8 @@ val status = client.call(null) { it.statusJson() }
 
 **Android 12 and later.** `startForegroundService` from the background throws
 `ForegroundServiceStartNotAllowedException`. `GromEmbed.start` catches it and
-returns `requested = false` with a `START_REFUSED:` reason, but the call should
+returns `requested = false` with `FOREGROUND_START_NOT_ALLOWED` (or
+`START_REFUSED` for any other refusal), but the call should
 not be made from that position in the first place: call `start` from a visible
 `Activity` (or from a user-initiated broadcast), never from
 `Application.onCreate` or a background `WorkManager` job. A host that needs a
@@ -125,6 +148,38 @@ exemption, exactly as the standalone `server29` flavour does.
 
 `GromEmbed.newClient` uses the host's own package; the signature gate passes by
 construction because caller and service are the same UID.
+
+### Health in one call (D90)
+
+A host that does not want to parse `statusJson` and translate Doctor codes can ask
+for the projection instead:
+
+```kotlin
+GromEmbed.health(context) { health ->            // background thread
+    // health.state: RUNNING | STARTING | ATTENTION | STOPPED | UNKNOWN
+    // health.headline: stable code, e.g. SERVER_RUNNING or BATTERY_OPTIMISED
+    // health.advice: at most four (code, EmbedAction) pairs
+}
+
+val blocking = GromEmbed.measureHealth(context)  // never from the main thread
+val report = GromEmbed.doctorReport(context)     // the full DoctorReport
+```
+
+`RUNNING` is produced only by a fully measured healthy report: a `BAD` row or an
+`unknown` row can never be green. The codes and their actions are listed in
+`docs/TWO-IN-ONE.md` §9. The health check binds with `createIfMissing = false`, so
+asking whether the server runs never starts it.
+
+`EmbedSettings.intentFor(context, advice.action)` turns an action into the right
+platform screen (battery exemption list, notification settings, app settings) and
+returns `null` for the actions the host draws itself.
+
+### Binding without starting it
+
+`GromClient.bind(listener, createIfMissing = false)` binds to a **running** server
+and returns `false` when none is up. `bind` also releases a dead registration
+before rebinding, so a client that saw `onNullBinding`/`onBindingDied` recovers
+instead of leaking the connection.
 
 A heartbeat is started for you: the announcement repeats every 30 seconds on a
 daemon thread and stops with `GromEmbed.stop(context)` (or `stopHeartbeat()` if

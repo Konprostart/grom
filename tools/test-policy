@@ -6,7 +6,7 @@
 # See D1, D2, D5, D15, D18, D21, D39…D47, D52…D87 and S1-R002…S1-R046,
 # S5-R001…S5-R055.
 #
-# The gate is intentionally a fixed count: "51/51" is the number of passes.
+# The gate is intentionally a fixed count: "55/55" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -292,7 +292,7 @@ check "the runtime reports the SDK's API version, not its own literal" \
 #     PORT_IN_USE — not as a signature or network failure. The probe and the
 #     refusal code are the seam both the host and the tests agree on.
 check "the control port is host-choosable and a conflict is named" \
-  bash -c "grep -q 'val controlPort: Int? = null' $MAIN/embed/GromEmbed.kt && grep -q 'GromPrefs.setPort' $MAIN/embed/GromEmbed.kt && grep -q 'ControlPort.refusal' $MAIN/embed/GromEmbed.kt && grep -q 'ControlPort.PORT_IN_USE' $MAIN/ServerRuntime.kt && grep -q 'const val PORT_IN_USE' $MAIN/core/ControlPort.kt"
+  bash -c "grep -q 'val controlPort: Int? = null' $MAIN/embed/GromEmbed.kt && grep -q 'GromPrefs.setPort' $MAIN/embed/GromEmbed.kt && grep -q 'ControlPort.resolve' $MAIN/embed/GromEmbed.kt && grep -q 'ControlPort.PORT_IN_USE' $MAIN/ServerRuntime.kt && grep -q 'const val PORT_IN_USE' $MAIN/core/ControlPort.kt"
 
 # 50. a host configures the data plane through one contract (D86). The Binder
 #     path and the standalone screen must not be two policies: the runtime may
@@ -307,6 +307,37 @@ check "host config save goes through the screen's one validation contract" \
 #     source set cannot silently grow the peripheral APK by ~91 MB.
 check "the peripheral flavour excludes the native runtime it never runs" \
   bash -c "grep -q 'withFlavor(\"role\" to \"peripheral26\")' app/build.gradle.kts && grep -q 'packaging.jniLibs.excludes' app/build.gradle.kts"
+
+# 52. the embed layer a host is told to call is pure and testable (D90). The
+#     health projection decides which lamp the host paints, so it must not carry
+#     an Android dependency: its rules have to run as JVM tests like the Doctor's.
+check "the host-facing embed model is pure Kotlin" \
+  bash -c "! grep -q '^import android\.' $MAIN/embed/EmbedHealth.kt && ! grep -q '^import android\.' $MAIN/embed/EmbedConsent.kt && grep -q 'class EmbedHealthTest' engine/src/test/java/app/grom/server/embed/EmbedHealthTest.kt"
+
+# 53. consent and the port are decided before the service is asked to start
+#     (D88, D89): a versioned consent gate, an opt-in automatic port, and a
+#     resolved port that is persisted rather than assumed.
+check "start routes through the consent gate and the port decision" \
+  bash -c "grep -q 'EmbedConsent.refusal' $MAIN/embed/GromEmbed.kt && grep -q 'ControlPort.resolve' $MAIN/embed/GromEmbed.kt && grep -q 'GromPrefs.setPort(app, choice.port)' $MAIN/embed/GromEmbed.kt && grep -q 'const val AUTO_PORT' $MAIN/core/ControlPort.kt && grep -q 'val AUTO_RANGE' $MAIN/core/ControlPort.kt && grep -q 'CONSENT_OUTDATED' $MAIN/embed/EmbedConsent.kt"
+
+# 54. every stable code the embed layer can return is documented for the host
+#     (D90). A code that only exists in the code is a sentence the host must
+#     invent, and the guide is the contract a host reads.
+check "every embed code is documented in the 2-in-1 guide" \
+  bash -c '
+    for f in "$MAIN/embed/EmbedHealth.kt" "$MAIN/embed/EmbedConsent.kt" "$MAIN/core/ControlPort.kt"; do
+      for code in $(grep -oE "\"[A-Z][A-Z0-9_]{4,}\"" "$f" | tr -d "\"" | sort -u); do
+        grep -q "$code" docs/TWO-IN-ONE.md || { echo "undocumented code: $code"; exit 1; }
+      done
+    done
+  '
+
+# 55. the notification worker is closed when the service dies (D66). It used to
+#     be closed nowhere: every service instance left one `grom-notify` thread
+#     behind, which is invisible in the standalone app and a slow leak in a host
+#     that stops and starts the embedded server.
+check "the notification worker is closed after the final flush" \
+  bash -c "grep -q 'runtime.closeNotifications()' $MAIN/service/GromService.kt && grep -q 'notifier.close()' $MAIN/ServerRuntime.kt && grep -q 'fun closeNotifications' $MAIN/ServerRuntime.kt"
 
 echo
 TOTAL=$((PASS + FAIL))

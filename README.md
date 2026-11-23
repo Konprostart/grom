@@ -62,7 +62,7 @@ second process (D58).
 | Devices on a device | **open** — pairing has never been exercised between two physical phones |
 | Doctor (why Android stops the server) | **delivered in code** — measured checks, honest `unknown`, run marker, API 8, three booleans in `/v1/status` (D80–D84) |
 | Doctor on a device | **open** — no physical phone has been measured |
-| "2 in 1" (host app ships Grom) | **delivered in code** — host-chosen control port, host-configured data plane (API 9), a 2.2 MB peripheral build; guide in `docs/TWO-IN-ONE.md` (D85–D87) |
+| "2 in 1" (host app ships Grom) | **delivered in code** — host-chosen or automatic control port, versioned consent, host-readable health, host-configured data plane (API 9), a ~1.6 MB release peripheral build (2.2 MB debug); guide in `docs/TWO-IN-ONE.md` (D85–D90) |
 
 When the runtime is genuinely absent, the app reports `MISSING_RUNTIME` and the
 agent endpoints answer `503` naming the missing file. That is the designed
@@ -317,10 +317,12 @@ runtime requirement and the trust-boundary cost.
 
 Shipping "2 in 1" — the app and the server in one package — has its own guide:
 [`docs/TWO-IN-ONE.md`](docs/TWO-IN-ONE.md). It covers the control port a host
-must choose (D85), configuring the public data plane through the Binder (D86),
-the ~38 MB runtime and the peripheral build that ships none of it (D87), the
-Android 12+ foreground-service rules, the battery exemption, and what happens
-when the operator also has the standalone Grom installed.
+chooses — or lets the engine choose (D85, D89), consent about a specific notice
+(D88), the one-call health a host can paint without parsing anything (D90),
+configuring the public data plane through the Binder (D86), the ~38 MB runtime
+and the peripheral build that ships none of it (D87), the Android 12+
+foreground-service rules, the battery exemption, and what happens when the
+operator also has the standalone Grom installed.
 
 ## How Grom works
 

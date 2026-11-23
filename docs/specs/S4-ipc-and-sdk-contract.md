@@ -97,11 +97,18 @@ No method may throw a checked exception to the client; failures surface as
 ## 5. Lifecycle
 
 ### S4-R017
-`GromClient` binds with `BIND_AUTO_CREATE` and reports the connection through a
-listener, never by polling `isBound` in a loop.
+`GromClient` binds with `BIND_AUTO_CREATE` by default and reports the connection
+through a listener, never by polling `isBound` in a loop. `bind(listener,
+createIfMissing = false)` MUST bind **without** creating the service, so a health
+check can ask whether the server is running without starting it, and MUST return
+`false` when nothing is running.
 
 ### S4-R018
-`GromClient.unbind()` MUST be idempotent.
+`GromClient.unbind()` MUST be idempotent, and MUST release the platform
+registration even when the connection never became usable — a null binding, a
+died binding or a failed version call. Dropping the registration without calling
+`unbindService` leaks it for the life of the process and turns every later
+`bind` into a no-op, because the client believes it is still bound.
 
 ### S4-R019
 A dead Binder (`DeadObjectException`) MUST be reported via the listener as a
@@ -180,10 +187,13 @@ is not running it fails as `GROM_E_SERVER_STOPPED`, and in the peripheral role a
 failure; it is reported through `statusJson()` under `super.error` (S5-R003).
 
 ### S4-R031
-`GromClient.API_VERSION` is `3` (it was `2` in the previous release). Clients
-MUST compare the value returned by `apiVersion()` before calling a method
-introduced in a later API (S4-R012). A client that only needs API 2 methods
-keeps working against an API 3 server.
+`GromClient.API_VERSION` names the **current** contract; the number itself lives
+only in §14 of this document plus the SDK constant, because two places kept it in
+step by hand and drifted twice. Clients MUST compare the value returned by
+`apiVersion()` before calling a method introduced in a later API (S4-R012). A
+method added under a later API number does not remove or change any earlier one,
+so a client that only needs the methods of an older API keeps working against a
+newer server.
 
 ### S4-R032
 A reload invalidates every password session of the data plane, because the
@@ -411,3 +421,43 @@ It MUST return the sanitised status (`passwordSet`, key ids) and MUST NOT return
 the stored password hash or any secret. It MUST pass the same per-transaction
 signature gate as every other method (S4-R007), and `apiVersion()` MUST still
 report `GromClient.API_VERSION` rather than a literal.
+
+## 15. The embed layer a host calls (D88–D90)
+
+The Binder contract is what a *client* uses. An embedding host uses a thin
+Kotlin layer on top of it, and that layer carries rules of its own because every
+host would otherwise re-implement them slightly wrongly.
+
+### S4-R052 — consent covers a notice version
+`GromEmbed.recordConsent` MUST store the operator's answer together with the
+notice version it was given for and the time it was recorded, and MUST clear the
+record when the answer is `false`. `GromEmbed.start` MUST refuse with
+`CONSENT_REQUIRED` when no answer is recorded and with `CONSENT_OUTDATED` when
+the host declares a notice version different from the recorded one. A host that
+declares no notice version MUST keep the pre-D88 behaviour. The record MUST stay
+in the host's private preferences and MUST NOT be transmitted anywhere.
+
+### S4-R053 — the control port is decided before the start
+`GromEmbed.start` MUST resolve the port through `ControlPort.resolve` **before**
+asking the platform for a foreground service, and MUST persist the resolved port.
+`GromEmbed.AUTO_PORT` MUST be an explicit opt-in that selects a free port from
+`ControlPort.AUTO_RANGE`, MUST reuse a stored port while it is free, MUST NOT
+select the standalone default port, MUST NOT relocate a listener that is already
+serving (the answer is `PORT_CHANGE_RESTART_REQUIRED`), and MUST report
+`PORT_IN_USE` when the range is exhausted. Every refusal is a stable code
+returned to the caller; none is a silent fallback.
+
+### S4-R054 — health is a projection of the Doctor, and codes are the contract
+`EmbedHealth.of(report)` MUST derive its state, headline and advice from a
+`DoctorReport` and MUST NOT measure anything itself. It MUST produce
+`EmbedState.RUNNING` only when every check measured `OK`; a `BAD` or `UNKNOWN`
+row MUST NOT produce it. It MUST NOT turn a `NOTICE` into advice. Every advice
+item MUST be a stable code plus an `EmbedAction`, and MUST NOT contain
+user-visible prose. `EmbedHealth` and `EmbedConsent` MUST remain pure Kotlin (no
+`android.*` import) so their rules run as JVM tests, and every code they can
+emit MUST be documented in `docs/TWO-IN-ONE.md`.
+
+`GromClient.bind(listener, createIfMissing = false)` MUST NOT create the service,
+MUST return `false` when no server is running, and `unbind()` MUST release the
+platform connection even after `onNullBinding` or `onBindingDied` (a registration
+that is dropped without `unbindService` leaks for the life of the process).

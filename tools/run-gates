@@ -45,7 +45,7 @@ step "JVM tests (engine and both flavours)" gradle_run \
   :app:testServer29DebugUnitTest \
   :app:testPeripheral26DebugUnitTest
 
-step "static policy (51 checks)" ./tools/test-policy
+step "static policy (55 checks)" ./tools/test-policy
 step "third-party ledger" ./tools/check-third-party
 step "IPC signing (C-008)" ./tools/verify-ipc-signing
 step "flavour contents (D87)" ./tools/check-flavours
