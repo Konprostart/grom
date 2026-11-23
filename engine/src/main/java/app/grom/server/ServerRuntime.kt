@@ -17,6 +17,7 @@ import app.grom.server.cluster.PeerAddress
 import app.grom.server.core.AgentState
 import app.grom.server.core.BindMode
 import app.grom.server.core.BindResolution
+import app.grom.server.core.ControlPort
 import app.grom.server.core.HealthGate
 import app.grom.server.core.Redactor
 import app.grom.server.core.SuperBindPolicy
@@ -48,11 +49,14 @@ import app.grom.server.store.SecureStore
 import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
 import app.grom.server.superserver.AuthMode
+import app.grom.server.superserver.ConfigParse
 import app.grom.server.superserver.ConfigExport
 import app.grom.server.superserver.SuperServerConfig
+import app.grom.server.superserver.SuperServerConfigInput
 import app.grom.server.superserver.SuperServerHost
 import app.grom.sdk.GromClient
 import java.io.File
+import java.net.BindException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -221,7 +225,24 @@ class ServerRuntime(
             }
 
             val server = LoopbackHttpServer(port, Router(this), logSink)
-            server.start() // throws if the bind is not loopback — deliberately fatal
+            try {
+                // Throws if the bind is not loopback — deliberately fatal — or
+                // when another process already holds the port (D85).
+                server.start()
+            } catch (_: BindException) {
+                // Two Groms on one phone (standalone + an embedding host) share
+                // the default control port unless the host chose another one.
+                // Report the fact instead of letting the platform's message be
+                // mistaken for a network or signature problem (S4-R051).
+                lastError = "${ControlPort.PORT_IN_USE}: port $port is already in use on loopback"
+                log("control plane refused: ${lastError()}")
+                safeAudit("server.start.refused", ControlPort.PORT_IN_USE)
+                throw ApiException(
+                    503,
+                    ControlPort.PORT_IN_USE,
+                    "port $port is already in use on loopback; another server is running"
+                )
+            }
             httpServer = server
             running = true
 
@@ -430,6 +451,33 @@ class ServerRuntime(
                 )
             }
             superServer.reload()
+            return status()
+        }
+    }
+
+    /**
+     * Validates, persists and applies a data plane document sent by an
+     * embedding host (D86).
+     *
+     * The document is the same one the standalone screen writes
+     * (`SuperServerConfig.toJson()`), and it is checked by the same contract:
+     * [SuperServerConfigInput.parse] refuses exactly what the screen refuses,
+     * with the same code. A refusal is `400` and nothing is written, so a host
+     * cannot half-apply a policy. Secrets travel in, never out: the returned
+     * status carries `passwordSet` and key ids only (D59).
+     */
+    fun saveSuperConfig(raw: String?): Map<String, Any?> {
+        synchronized(lock) {
+            val parsed = SuperServerConfigInput.parse(raw, port)
+            if (parsed is ConfigParse.Refused) {
+                throw ApiException(400, parsed.code, parsed.message)
+            }
+            val accepted = (parsed as ConfigParse.Parsed).config
+            superServer.saveConfig(accepted)
+            safeAudit(
+                "super.config.saved",
+                "enabled=${accepted.enabled} bind=${accepted.bind.name} auth=${accepted.auth.name}"
+            )
             return status()
         }
     }

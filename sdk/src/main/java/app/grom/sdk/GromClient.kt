@@ -133,8 +133,9 @@ class GromClient(
          * API 5 adds the operator's notification settings (D65); API 6 adds the
          * device identity, mutual pairing and the fleet roster (D70-D75); API 7
          * adds the one-way scoped grant for an inbound reader (D76-D78); API 8
-         * adds the measured Doctor report (D80-D84).
+         * adds the measured Doctor report (D80-D84); API 9 adds a supported way
+         * for an embedding host to configure the data plane (D86).
          */
-        const val API_VERSION: Int = 8
+        const val API_VERSION: Int = 9
     }
 }

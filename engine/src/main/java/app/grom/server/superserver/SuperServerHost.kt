@@ -99,21 +99,39 @@ class SuperServerHost(
     @Volatile
     private var startedAtMs: Long = 0L
 
+    /**
+     * Whether [start] has been asked for and [stop] has not followed.
+     *
+     * It is what lets [saveConfig] apply a new document to a live plane without
+     * ever binding a socket on a plane the runtime has not started (D86).
+     */
+    @Volatile
+    private var started: Boolean = false
+
     fun start() {
         synchronized(lock) {
             stopLocked()
+            started = true
             startLocked()
         }
     }
 
     fun stop() {
         synchronized(lock) {
+            started = false
             stopLocked()
         }
     }
 
     fun reload() {
         synchronized(lock) {
+            if (!started) {
+                // A reload before start would bind a socket nobody asked for.
+                // Take the document in memory only; start() loads it again.
+                config = configStore.load()
+                lastError = configStore.lastError
+                return
+            }
             val loaded = configStore.load()
             // Changing only npub/relays/remoteBridge cannot invalidate a session
             // or a listener, so it is applied in place (D54). Everything else
@@ -136,6 +154,23 @@ class SuperServerHost(
     }
 
     fun isRunning(): Boolean = server?.isRunning() == true
+
+    /**
+     * Persists an already-validated document and applies it (D86).
+     *
+     * Validation is not optional and not repeated here: the only way to produce
+     * the argument is [SuperServerConfigInput.parse], which runs the screen's
+     * own contract. Saving implies applying — a host that writes a document and
+     * then reads a status telling it nothing happened would be a lie.
+     */
+    fun saveConfig(newConfig: SuperServerConfig) {
+        synchronized(lock) {
+            configStore.save(newConfig)
+        }
+        // Outside the lock: reload() takes it, and a bind failure must not be
+        // reported while holding it.
+        reload()
+    }
 
     /**
      * Runs the Lightning adapter's `health` op now (D52). This is the only path

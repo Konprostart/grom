@@ -192,4 +192,15 @@ interface IGromServer {
      * contains a token, a chat id, an SSH host or a peer address (D80).
      */
     String doctorJson();
+
+    // ------------------------------------------------------ API 9 (D85-D86)
+
+    /**
+     * Validates a data plane document exactly as the standalone screen does and
+     * persists it: the `SuperServerConfig.toJson()` shape, including a PBKDF2
+     * `passwordHash` (never a plaintext password). A refusal is an ApiException
+     * with the same stable code the screen would show, and nothing is written.
+     * Returns the sanitised server status; secrets never travel back (D86).
+     */
+    String superSaveConfig(String json);
 }

@@ -31,14 +31,13 @@ object GromPrefs {
     }
 
     /**
-     * Reserves the loopback control port for a host that cannot use 47001.
+     * Reserves the loopback control port for a host that cannot use 47001 (D85).
      *
-     * `port()` already honours this key, but nothing in this tree calls the
-     * setter: the standalone app is the only server on its own device, so the
-     * default is always free. It is kept deliberately as the seam an embedding
-     * host needs once two servers can share a phone — a second app that embeds
-     * the engine would otherwise collide on 47001. Wiring it into
-     * `GromEmbed.Options` is a decision (D85), not an accident left unfixed.
+     * Two Groms can share one phone — the standalone app and a host application
+     * that embeds `:engine` are separate packages — so the second one must be
+     * able to move off the default. Only `GromEmbed` writes this key; the
+     * standalone app keeps the default and reports a conflict honestly instead
+     * of silently moving to a port its clients do not know.
      */
     fun setPort(context: Context, port: Int) {
         if (BindPolicy.isAllowedPort(port)) {

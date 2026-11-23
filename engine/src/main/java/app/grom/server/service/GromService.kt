@@ -51,9 +51,16 @@ class GromService : Service() {
         startForegroundSafely()
         return try {
             runtime.start()
+            servingPort = runtime.port
             START_STICKY
         } catch (failure: Throwable) {
-            Log.e(TAG, "server start refused: ${failure.javaClass.simpleName}")
+            // D85: name a port conflict instead of letting it look like a
+            // signature or network problem. The code is already in lastError.
+            Log.e(
+                TAG,
+                "server start refused: ${failure.javaClass.simpleName}" +
+                    (runtime.lastError()?.let { " ($it)" } ?: "")
+            )
             stopSelf()
             START_NOT_STICKY
         }
@@ -67,8 +74,13 @@ class GromService : Service() {
         if (!runtime.isRunning()) {
             try {
                 runtime.start()
+                servingPort = runtime.port
             } catch (failure: Throwable) {
-                Log.e(TAG, "server start refused during bind")
+                Log.e(
+                    TAG,
+                    "server start refused during bind" +
+                        (runtime.lastError()?.let { ": $it" } ?: "")
+                )
                 return null
             }
         }
@@ -77,6 +89,7 @@ class GromService : Service() {
 
     override fun onDestroy() {
         runtime.stop()
+        servingPort = -1
         // A clean stop is recorded before the notification flush so the marker is
         // durable even if the flush runs out of window (D66, D83).
         runCatching { runtime.endRunSession() }
@@ -127,6 +140,18 @@ class GromService : Service() {
         override fun reloadSuperServer() = guard {
             requireSameSigner()
             runtime.reloadSuperServer()
+        }
+
+        override fun superSaveConfig(json: String?): String {
+            requireSameSigner()
+            return try {
+                Json.encode(runtime.saveSuperConfig(json))
+            } catch (failure: ApiException) {
+                // The screen's own code crosses the Binder, so a host can act on
+                // PORT_CONFLICT or CREDENTIAL_REQUIRED instead of "it failed"
+                // (D86, S4-R016).
+                throw IllegalStateException("GROM_E_${failure.code}: ${failure.message}")
+            }
         }
 
         // ------------------------------------------------ API 3 (D55, S4 §8)
@@ -412,5 +437,20 @@ class GromService : Service() {
         private const val CHANNEL_ID = "grom-server"
         private const val NOTIFICATION_ID = 47001
         private const val NOTIFY_FLUSH_MS = 2_500L
+
+        /**
+         * The control port this process is serving, or `-1` (D85).
+         *
+         * A service instance is a process singleton, so this is not shared
+         * state between servers: it is how [app.grom.server.embed.GromEmbed]
+         * asks "is the port I am about to probe my own listener?" before it
+         * reports a conflict that is not one.
+         */
+        @Volatile
+        private var servingPort: Int = -1
+
+        fun currentServingPort(): Int = servingPort
+
+        fun isServing(port: Int): Boolean = servingPort == port
     }
 }
