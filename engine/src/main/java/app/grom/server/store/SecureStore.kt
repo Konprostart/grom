@@ -32,7 +32,19 @@ class SecureStore(private val directory: File) {
     private fun newToken(): String {
         val token = Token.generate()
         directory.mkdirs()
-        tokenFile.writeText(token + "\n")
+        // Temp-then-rename, like every other store (D40). A plain `writeText`
+        // truncates first, so a process killed mid-write would leave a partial
+        // token that the next start reads as invalid and silently replaces —
+        // which rotates the operator's token without them asking. The rename is
+        // atomic on the same directory, so a reader sees either the old file or
+        // the complete new one.
+        val temp = File(directory, "$TOKEN_FILE.tmp")
+        temp.writeText(token + "\n")
+        harden(temp)
+        if (!temp.renameTo(tokenFile)) {
+            temp.copyTo(tokenFile, overwrite = true)
+            temp.delete()
+        }
         harden(tokenFile)
         return token
     }

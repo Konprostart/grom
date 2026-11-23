@@ -44,6 +44,10 @@ class AndroidDoctorProbe(
         // One call, read once: two calls could straddle a new exit record and
         // report a reason that does not belong to the timestamp next to it.
         val exit = lastExit()
+        // Same rule for memory: `availMem` and `lowMemory` come from one
+        // `ActivityManager.MemoryInfo`, so a second read could pair a fresh
+        // figure with the previous pressure flag.
+        val memory = memory()
 
         return DoctorFacts(
             batteryExempt = power?.let {
@@ -73,8 +77,8 @@ class AndroidDoctorProbe(
             charging = battery?.second,
             lowRamDevice = activity?.let { attempt("lowRamDevice") { it.isLowRamDevice } },
             freeBytes = freeBytes(),
-            availableMemBytes = memory()?.first,
-            lowMemory = memory()?.second,
+            availableMemBytes = memory?.first,
+            lowMemory = memory?.second,
             network = network()?.first,
             metered = network()?.second,
             lastExitReason = exit?.first,

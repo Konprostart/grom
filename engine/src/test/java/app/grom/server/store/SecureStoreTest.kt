@@ -3,6 +3,7 @@ package app.grom.server.store
 
 import app.grom.server.core.Token
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -69,5 +70,25 @@ class SecureStoreTest {
         val file = File(dir, SecureStore.TOKEN_FILE)
         assertTrue(file.isFile)
         assertTrue(file.canRead())
+    }
+
+    @Test
+    fun `the write is atomic and leaves no temp file`() {
+        val dir = temporary.newFolder()
+        SecureStore(dir).loadOrCreate()
+        assertTrue(File(dir, SecureStore.TOKEN_FILE).isFile)
+        // A rename moves the temp file away; a leftover would mean the write
+        // path truncated the live token instead.
+        assertFalse(File(dir, "${SecureStore.TOKEN_FILE}.tmp").exists())
+    }
+
+    @Test
+    fun `a stale temp file is never read as the token`() {
+        val dir = temporary.newFolder()
+        val token = SecureStore(dir).loadOrCreate()
+        // Simulate a crash between write and rename of an earlier attempt.
+        File(dir, "${SecureStore.TOKEN_FILE}.tmp").writeText("stale-partial-value\n")
+        assertEquals(token, SecureStore(dir).loadOrCreate())
+        assertEquals(token, SecureStore(dir).current())
     }
 }
