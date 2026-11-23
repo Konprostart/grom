@@ -73,9 +73,6 @@ class SupervisorPolicy(
         return state
     }
 
-    /** The start timeout elapsed without a ready line. */
-    fun onStartTimeout(): AgentState = onCrash("start timeout")
-
     /**
      * Any exit, timeout or pid mismatch before/after readiness (S3-R017).
      * Returns the state the caller must act on: BACKOFF → schedule a restart,
@@ -133,8 +130,6 @@ class SupervisorPolicy(
         val index = (crashes.size - 1).coerceIn(0, config.backoffScheduleMs.size - 1)
         return config.backoffScheduleMs[index]
     }
-
-    fun startElapsedMs(): Long = if (state == AgentState.STARTING) clock() - startedAt else 0L
 
     fun startTimedOut(): Boolean =
         state == AgentState.STARTING && (clock() - startedAt) >= config.startTimeoutMs

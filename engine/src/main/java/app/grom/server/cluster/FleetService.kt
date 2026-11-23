@@ -102,8 +102,6 @@ class FleetService(
         return Json.encode(pairing.start())
     }
 
-    fun pairingStatusJson(): String = Json.encode(pairing.statusDocument())
-
     fun pendingJson(): String = Json.encode(mapOf("pending" to pairing.pendingDocument()))
 
     fun completePairingJson(body: String): String {

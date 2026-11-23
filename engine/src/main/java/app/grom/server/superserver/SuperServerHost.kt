@@ -160,8 +160,6 @@ class SuperServerHost(
         }
     }
 
-    fun logLastError(): String? = lastError
-
     /**
      * The configuration currently applied. Read by the sanitised export (D53)
      * and by the SSH bridge so it forwards to the address that really exists.

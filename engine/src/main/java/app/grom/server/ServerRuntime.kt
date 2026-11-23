@@ -270,8 +270,6 @@ class ServerRuntime(
 
     fun tokenFingerprint(): String = if (token.isEmpty()) "\u2014" else Token.fingerprint(token)
 
-    fun tokenValue(): String = token
-
     fun lastError(): String? = lastError
 
     // ------------------------------------------------------------------ GromApi
@@ -759,8 +757,6 @@ class ServerRuntime(
             )
         }
     }
-
-    fun peerPairingStatusJson(): String = fleet.pairingStatusJson()
 
     fun peerPairPendingJson(): String = fleet.pendingJson()
 

@@ -117,12 +117,6 @@ class PairingSession(
     @Synchronized
     fun isOpen(): Boolean = active()
 
-    @Synchronized
-    fun status(): Map<String, Any?> = linkedMapOf(
-        "open" to active(),
-        "expiresAtMs" to if (active()) expiresAtMs else 0L
-    )
-
     /**
      * Compares the hash supplied by the joining device with the hash of the
      * current code bound to that device. The comparison is constant-time and
@@ -250,13 +244,6 @@ class PairingEndpoint(
             "fingerprint" to self.fingerprint()
         )
     }
-
-    @Synchronized
-    fun statusDocument(): Map<String, Any?> = linkedMapOf(
-        "ok" to true,
-        "session" to session.status(),
-        "pending" to pendingDocumentLocked()
-    )
 
     /** The joining device waiting for this operator's decision, if any. */
     @Synchronized
