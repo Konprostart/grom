@@ -36,30 +36,61 @@ class GromClient(
         fun onDisconnected(reason: String)
     }
 
+    /**
+     * The live binder, or `null` when there is none.
+     *
+     * `@Volatile` because the connection callbacks arrive on the main thread
+     * while [call] runs on whichever thread the host chose: without it a caller
+     * could keep reading a stale `null` (or a dead binder) after a rebind.
+     */
+    @Volatile
     var server: IGromServer? = null
         private set
 
     private var listener: Listener? = null
+
+    /**
+     * True while the platform still holds our [connection].
+     *
+     * It is deliberately **not** cleared when the connection dies: Android keeps
+     * the registration until `unbindService` is called, so clearing it early
+     * (as `onNullBinding` used to) leaks the connection for the life of the
+     * process and makes every later `bind` a no-op.
+     */
+    @Volatile
     private var bound = false
+
+    /** True while [server] can actually be used; false after any death. */
+    @Volatile
+    private var usable = false
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val api = IGromServer.Stub.asInterface(binder)
             if (api == null) {
+                usable = false
                 listener?.onDisconnected("binder unavailable")
                 return
             }
             server = api
+            usable = true
             val version = try {
                 api.apiVersion()
             } catch (_: RemoteException) {
-                -1
+                // A binder that cannot even answer the version call is not
+                // usable, and the caller is told so rather than handed a client
+                // whose every later call silently falls back.
+                server = null
+                usable = false
+                listener?.onDisconnected("version call failed")
+                return
             }
             listener?.onConnected(version)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             server = null
+            usable = false
             listener?.onDisconnected("service disconnected")
         }
 
@@ -71,27 +102,45 @@ class GromClient(
             // platform, and shows up as `bindService` returning false
             // (S4-R008/S4-R009). The old text here claimed "signature rejected",
             // which sent an integrator hunting the wrong cause.
+            //
+            // The registration is still held by the platform, so `bound` stays
+            // true and `unbind()` will really release it (S4-R018).
             server = null
-            bound = false
+            usable = false
             listener?.onDisconnected("the service refused to start")
         }
 
         override fun onBindingDied(name: ComponentName?) {
             server = null
+            usable = false
             listener?.onDisconnected("binding died")
         }
     }
 
-    /** Returns false when the platform refused the bind outright. */
-    fun bind(listener: Listener): Boolean {
+    /**
+     * Binds to the server.
+     *
+     * @param createIfMissing when false the service is **not** started if it is
+     *   not already running (`bindService` without `BIND_AUTO_CREATE`). That is
+     *   what a health check needs: asking "is it running?" must never make it
+     *   run. The call then returns false when nothing is running.
+     * @return false when the platform refused the bind outright, or (with
+     *   `createIfMissing = false`) when no server is up.
+     */
+    fun bind(listener: Listener, createIfMissing: Boolean = true): Boolean {
         this.listener = listener
-        if (bound) return true
+        if (bound && usable) return true
+        // A dead registration still holds the platform connection; release it
+        // before asking for a new one, or `bindService` returns the dead binder.
+        if (bound) release()
         val intent = Intent(ACTION).apply {
             setClassName(serverPackage(), SERVICE_CLASS)
         }
-        bound = runCatching { context.bindService(intent, connection, Context.BIND_AUTO_CREATE) }
+        val flags = if (createIfMissing) Context.BIND_AUTO_CREATE else 0
+        bound = runCatching { context.bindService(intent, connection, flags) }
             .getOrDefault(false)
         if (!bound) {
+            usable = false
             listener.onDisconnected("bind refused")
         }
         return bound
@@ -100,7 +149,12 @@ class GromClient(
     /** Idempotent (S4-R018). */
     fun unbind() {
         if (!bound) return
+        release()
+    }
+
+    private fun release() {
         bound = false
+        usable = false
         server = null
         runCatching { context.unbindService(connection) }
     }
@@ -112,6 +166,7 @@ class GromClient(
             block(api)
         } catch (_: RemoteException) {
             server = null
+            usable = false
             fallback
         }
     }

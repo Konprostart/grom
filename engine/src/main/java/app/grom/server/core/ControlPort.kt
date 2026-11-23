@@ -28,16 +28,76 @@ object ControlPort {
     /** Stable code for a port the bind policy would refuse before any socket exists. */
     const val NOT_ALLOWED: String = "BAD_CONTROL_PORT"
 
+    /** A port change cannot move a listener that is already serving (S4-R051). */
+    const val RESTART_REQUIRED: String = "PORT_CHANGE_RESTART_REQUIRED"
+
     /**
-     * The stable code that stops a start, or `null` when [port] can be used.
-     *
-     * This is the decision a host needs *before* it starts the service, so the
-     * failure is a returned code rather than a process that dies later.
+     * The sentinel a host passes when it does not want to think about ports
+     * (D89). It is never a real port: [resolve] replaces it with a free one from
+     * [AUTO_RANGE] *before* the service starts, and the choice is returned.
      */
-    fun refusal(port: Int): String? = when {
-        !BindPolicy.isAllowedPort(port) -> NOT_ALLOWED
-        !isFree(port) -> PORT_IN_USE
-        else -> null
+    const val AUTO_PORT: Int = 0
+
+    /**
+     * Where an automatic choice looks. Deliberately away from the standalone
+     * app's 47001 and from the public data plane's 47002, so an embedding host
+     * and an installed Grom cannot collide by default.
+     */
+    val AUTO_RANGE: IntRange = 47100..47199
+
+    /**
+     * Which port the server should serve, as a decision rather than an attempt
+     * (D85, D89).
+     *
+     * @param requested what the host asked for: `null` keeps the stored port,
+     *   [AUTO_PORT] asks for the first free port from [AUTO_RANGE], anything
+     *   else is a specific choice.
+     * @param stored the port persisted from a previous run.
+     * @param serving the port this process is already serving, or `-1`.
+     * @param isFree the probe; injectable so the matrix is testable without a
+     *   socket (D30).
+     */
+    fun resolve(
+        requested: Int?,
+        stored: Int,
+        serving: Int,
+        isFree: (Int) -> Boolean
+    ): Choice {
+        // A listener that is already up cannot be moved without a restart, and
+        // pretending otherwise would break every client holding the old port.
+        if (serving > 0) {
+            return when {
+                requested == null || requested == AUTO_PORT || requested == serving -> Choice(serving)
+                !BindPolicy.isAllowedPort(requested) -> Choice(serving, NOT_ALLOWED)
+                else -> Choice(serving, RESTART_REQUIRED)
+            }
+        }
+        if (requested != null && requested != AUTO_PORT) {
+            if (!BindPolicy.isAllowedPort(requested)) return Choice(requested, NOT_ALLOWED)
+            if (!isFree(requested)) return Choice(requested, PORT_IN_USE)
+            return Choice(requested)
+        }
+        if (requested == AUTO_PORT) {
+            // Reuse the stored choice when it is still usable: the hub's tunnel
+            // target, a paired device and the host's own bookmarks all remember
+            // a port, so an automatic choice must be stable between restarts.
+            if (BindPolicy.isAllowedPort(stored) &&
+                stored != BindPolicy.DEFAULT_PORT &&
+                isFree(stored)
+            ) {
+                return Choice(stored)
+            }
+            val picked = AUTO_RANGE.firstOrNull { isFree(it) }
+            return if (picked != null) Choice(picked) else Choice(stored, PORT_IN_USE)
+        }
+        if (!BindPolicy.isAllowedPort(stored)) return Choice(stored, NOT_ALLOWED)
+        if (!isFree(stored)) return Choice(stored, PORT_IN_USE)
+        return Choice(stored)
+    }
+
+    /** A port and the stable reason it cannot be used, `null` when it can. */
+    data class Choice(val port: Int, val refusal: String? = null) {
+        val usable: Boolean get() = refusal == null
     }
 
     /**

@@ -8,7 +8,6 @@ import app.grom.server.http.Router
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.BindException
@@ -40,7 +39,7 @@ class ControlPortTest {
         val port = freePort()
 
         assertTrue(ControlPort.isFree(port))
-        assertNull(ControlPort.refusal(port))
+        assertTrue(decision(port).usable)
     }
 
     @Test
@@ -50,7 +49,7 @@ class ControlPortTest {
             val port = socket.localPort
 
             assertFalse(ControlPort.isFree(port))
-            assertEquals(ControlPort.PORT_IN_USE, ControlPort.refusal(port))
+            assertEquals(ControlPort.PORT_IN_USE, decision(port).refusal)
         } finally {
             socket.close()
         }
@@ -58,9 +57,9 @@ class ControlPortTest {
 
     @Test
     fun `ports the bind policy would refuse are refused before any socket exists`() {
-        assertEquals(ControlPort.NOT_ALLOWED, ControlPort.refusal(0))
-        assertEquals(ControlPort.NOT_ALLOWED, ControlPort.refusal(-1))
-        assertEquals(ControlPort.NOT_ALLOWED, ControlPort.refusal(70_000))
+        // `0` is the automatic-port sentinel (D89), not an invalid port.
+        assertEquals(ControlPort.NOT_ALLOWED, decision(-1).refusal)
+        assertEquals(ControlPort.NOT_ALLOWED, decision(70_000).refusal)
         assertFalse(ControlPort.isFree(0))
     }
 
@@ -92,7 +91,7 @@ class ControlPortTest {
         listeners += first
 
         val other = freePort()
-        assertNull(ControlPort.refusal(other))
+        assertTrue(decision(other).usable)
         val second = LoopbackHttpServer(other, Router(FakeApi()))
         second.start()
         listeners += second
@@ -104,6 +103,10 @@ class ControlPortTest {
 
     /** A port the OS just handed out is free by definition once released. */
     private fun freePort(): Int = ServerSocket(0, 1, BindPolicy.loopbackAddress()).use { it.localPort }
+
+    /** The decision for an explicit port while nothing is serving. */
+    private fun decision(port: Int): ControlPort.Choice =
+        ControlPort.resolve(port, stored = port, serving = -1) { ControlPort.isFree(it) }
 
     private class FakeApi : GromApi {
         override fun apiVersion(): Int = 1
