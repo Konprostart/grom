@@ -12,6 +12,10 @@ The shipped Grom app is just the reference host. Any application can depend on
 public data plane, audit chain, project registry and SSH bridge — inside its own
 package, without a second installation and without an IPC permission.
 
+This document is the API reference. The shipping guide — ports, lifecycle,
+permissions, APK size, coexistence with a standalone Grom and the operator-facing
+honesty rules — is `docs/TWO-IN-ONE.md`.
+
 ---
 
 ## 1. Add the module
@@ -44,9 +48,13 @@ standalone `server29` flavour does.
 
 The Node runtime binaries are **not** part of the library: `execve` requires the
 file to live in the hosting APK's `nativeLibraryDir` (D34). Add them to the host
-app with `scripts/fetch-node-android.sh --install-dir <host>/app/src/main/jniLibs`.
+app with `scripts/build-node-android.sh --install-dir <host>/app/src/main/jniLibs`.
 Without them the server runs and honestly reports `MISSING_RUNTIME`; `kv.*`
 returns `503 STORAGE_UNAVAILABLE`.
+
+That is ~38 MB of APK and ~91 MB installed, arm64 only. Grom's own peripheral
+role ships none of it (D87), and a host should apply the same rule to a variant
+that never starts the agent.
 
 ---
 
@@ -83,7 +91,8 @@ val result = GromEmbed.start(
         projectVersion = "1.2.0",
         capabilities = setOf("kv", "lightning.ref"),
         heartbeat = true,                  // repeat the announcement (default)
-        heartbeatIntervalMs = 30_000       // clamped to 5 s … 10 min
+        heartbeatIntervalMs = 30_000,      // clamped to 5 s … 10 min
+        controlPort = 47_101               // D85: not the standalone app's 47001
     )
 ) { registered ->                      // runs on a background thread
     if (!registered) Log.w("Grom", "project registration did not complete")
@@ -99,7 +108,7 @@ missing. Ask the server for the truth:
 ```kotlin
 val client = GromEmbed.newClient(context)   // Target.EMBEDDED
 client.bind(object : GromClient.Listener {
-    override fun onConnected(apiVersion: Int) { /* apiVersion == 8 */ }
+    override fun onConnected(apiVersion: Int) { /* apiVersion == 9 */ }
     override fun onDisconnected(reason: String) { /* show the reason */ }
 })
 val status = client.call(null) { it.statusJson() }
@@ -124,7 +133,7 @@ disk.
 
 ---
 
-## 4. The IPC surface (API 4 to 8)
+## 4. The IPC surface (API 4 to 9)
 
 | Method | Purpose |
 |---|---|
@@ -140,6 +149,32 @@ disk.
 | `nodeIdentityJson()` … `peerRefreshJson()` | **API 6**: the device identity, mutual pairing and the paired-device roster (D70–D75) |
 | `peerGrantJson(json)` | **API 7**: one-way trust for an inbound reader such as a VPS hub (D76–D78) |
 | `doctorJson()` | **API 8**: one measured Doctor report — read-only, works while the server is stopped, contains no credential or address (D80–D84) |
+| `superSaveConfig(json)` | **API 9**: validate and apply a data-plane document with the screen's own contract; refusals carry the screen's code and write nothing (D86) |
+
+### Choosing the control port (D85)
+
+`GromEmbed.Options.controlPort` (or `GromEmbed.setControlPort`) moves the
+loopback control plane off the standalone default. A taken port is returned as
+`PORT_IN_USE` *before* the service starts, never as a generic refusal, and the
+server never falls back to another port. `GromEmbed.controlPort` reads the stored
+choice. The full rules — including why a port change needs a restart — are in
+`docs/TWO-IN-ONE.md` §3.3.
+
+### Configuring the public data plane (D86)
+
+The control plane is loopback-only and always on; the public data plane is
+opt-in. A host configures it with the same document the operator screen writes:
+
+```kotlin
+client.call(null) { api ->
+    api.superSaveConfig(SuperServerConfig.defaults()
+        .copy(enabled = true, bind = BindMode.LAN, auth = AuthMode.KEY, keys = listOf(key))
+        .toJson())
+}
+```
+
+A refusal is an `ApiException` with the screen's stable code and nothing is
+written; the returned status carries `passwordSet` and key ids only.
 
 Every method runs the same per-transaction signature check as API 1 and 2. A
 foreign certificate still never reaches the server state.

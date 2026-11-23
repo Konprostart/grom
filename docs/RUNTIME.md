@@ -25,7 +25,9 @@ is just data, so the agent script correctly stays in app storage.
 
 `libnode.so` is operator-supplied and never committed: it is ~46 MB, its
 dependencies another ~45 MB. Grom never downloads it at runtime (S1-R003,
-S3-R037). The agent script is Grom's own code — `agent/grom-agent.js` is the one
+S3-R037). Only the **server** role packages it: `peripheral26` never executes
+the agent, so its APK carries no native libraries at all (D87,
+`tools/check-flavours`). The agent script is Grom's own code — `agent/grom-agent.js` is the one
 canonical copy, packaged into the APK as `assets/node/grom-agent.js`.
 
 ## Current status

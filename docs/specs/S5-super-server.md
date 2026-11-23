@@ -484,3 +484,17 @@ The Doctor MUST be local to the device apart from S5-R052: it MUST NOT appear in
 `GET /v1/config`, in the sanitised export or in the fleet block, and the deep
 system facts it cannot read (Doze whitelist, phantom-process limit, app-ops,
 vendor lists) MUST be read by the operator over adb rather than by the app.
+
+### S5-R054 (D86)
+A data plane document supplied over IPC MUST be parsed with the same contract as
+the standalone screen — the same field rules, the same validation and the same
+64 KiB cap — and MUST be refused with the screen's stable code and no partial
+write. A plaintext password MUST NOT be accepted; the document carries a PBKDF2
+hash. Persisting a document MUST NOT start a listener that the runtime has not
+started, and applying it MUST NOT require a new route.
+
+### S5-R055 (D87)
+The engine MUST remain an ordinary library so a host can embed it, and the
+peripheral role MUST NOT package the native runtime. A packaging change that
+re-adds the runtime to the peripheral role MUST fail a gate rather than only
+enlarge an APK.

@@ -20,8 +20,8 @@ android {
         applicationId = "app.grom.server"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.13.0"
+        versionCode = 14
+        versionName = "0.14.0"
     }
 
     // Two role flavours (F1 step 1):

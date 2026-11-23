@@ -40,8 +40,10 @@ git push origin v0.6.0
 1. assembles the pinned arm64 bionic runtime (`scripts/fetch-node-android.sh --all`),
 2. installs it into `app/src/main/jniLibs/arm64-v8a/` (D34),
 3. builds `server29` and `peripheral26` release APKs,
-4. asserts each APK contains `lib/arm64-v8a/libnode.so` and
-   `assets/node/grom-agent.js` and passes `apksigner verify`,
+4. asserts both APKs contain `assets/node/grom-agent.js` and pass
+   `apksigner verify`, that **only** `server29` contains
+   `lib/arm64-v8a/libnode.so`, and that `peripheral26` carries no native
+   libraries at all (D87),
 5. attaches **version-free** assets — `grom-server29.apk`,
    `grom-peripheral26.apk` and `SHA256SUMS` — so the permanent links
    `releases/latest/download/grom-server29.apk` keep working across releases

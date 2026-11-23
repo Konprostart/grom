@@ -304,3 +304,15 @@ reported as a fact derived from a run marker, and its cause MUST be reported onl
 when the platform supplies one; below API 30 the cause MUST be unknown. The
 diagnostic report MUST be an allow-list that carries no token, chat id, SSH host,
 key, address or free text.
+
+## 17. Two Groms on one phone (D85, D87)
+
+### S1-R046
+A phone MAY hold more than one Grom — the standalone application and a host
+application that embeds the engine are separate packages. Each instance MUST keep
+its own storage, token, node identity and peer store; no instance may read or
+share another's. An embedding host MUST be able to choose its loopback control
+port. A start whose port is already held MUST report the stable code
+`PORT_IN_USE`; it MUST NOT silently move to another port, and it MUST NOT be
+reported as a signature or network failure. The peripheral role MUST NOT package
+the native runtime it never executes.

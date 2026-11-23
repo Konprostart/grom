@@ -1571,9 +1571,12 @@ Numbered, file-level, in dependency order. "Gate" names the check that proves it
 > battery exemption and assigns the forward port, and it destroys nothing on the
 > device. Diagnostics are Phase 1I (`engine/.../doctor/`, `docs/DOCTOR.md`,
 > D80–D84): the phone explains why Android stopped it, from measurements only,
-> and publishes three booleans in `/v1/status`. Deliberately **not**
-> implemented: discovery, a heartbeat endpoint, placement and a phone-side
-> roster (C3). Those stay here.
+> and publishes three booleans in `/v1/status`. Shipping the engine inside a host
+> application is Phase 1J (D85–D87, `docs/TWO-IN-ONE.md`): a host-chosen control
+> port, a host-configured data plane through the screen's own validation, and a
+> peripheral flavour that carries no runtime it never runs. Deliberately **not**
+> implemented: discovery, a heartbeat endpoint, placement, a phone-side roster
+> (C3) and companion (two-APK) installation. Those stay here.
 
 | # | task | files | gate |
 |---|---|---|---|

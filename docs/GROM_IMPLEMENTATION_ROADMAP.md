@@ -19,6 +19,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1G — VPS hub and inbound-only trust (Phase C)** | **done** | `tools/grom-hub` + `tools/hub/`, one-way scoped grant (API 7), unique forward ports, `SSH_FORWARD_REFUSED`; `docs/HUB.md`; D76–D78 |
 | **1H — provisioning from a computer** | **done** | `tools/grom-provision` + `tools/provision/`, `list`/`plan`/`apply`/`emit` over `adb`, battery exemption and one forward port per phone; `docs/PROVISION.md`; D79 |
 | **1I — Doctor diagnostics** | **done** | `engine/.../doctor/` (facts, rules, report, run marker, one Android probe), API 8, Doctor section in the menu, `doctor`/`--fix` in `tools/grom-provision`, three status booleans; `docs/DOCTOR.md`; D80–D84 |
+| **1J — "2 in 1": host-chosen control port, host-configured data plane, a lean peripheral** | **done** | `core/ControlPort` + `GromEmbed.Options.controlPort` (D85), `superSaveConfig` API 9 + `SuperServerConfigInput` (D86), peripheral `jniLibs` exclusion (D87), `docs/TWO-IN-ONE.md`; `tools/check-flavours` |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -26,7 +27,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **5 — backup, CLI, advanced** | blocked by 4 | `backup/`, `cli/` |
 | **6 — production** | blocked by 5 | signing key, soak, review |
 
-Current version: `0.13.0` (versionCode 13). The twelve gates in `tools/run-gates`
+Current version: `0.14.0` (versionCode 14). The thirteen gates in `tools/run-gates`
 are the baseline; every phase below adds tests, not gates that replace them.
 
 **The next concrete action** is T-01 (`apps/AppManifest.kt`), because every later
@@ -550,3 +551,28 @@ lint 0/0.
 Not closed by this phase: no physical phone was measured from this repository
 (B2); the Doctor raises the odds of surviving and explains a failure, it does not
 promise uptime; and force-stop remains unbeatable.
+
+### Phase 1J — "2 in 1": a host app that ships Grom — **done**
+
+The shipping gap between "the engine is embeddable" and "an operator can install
+one app that has a server". Three pieces, each with a decision:
+
+| decision | change |
+|---|---|
+| **D85** | `core/ControlPort` + `GromEmbed.Options.controlPort`: the host chooses the loopback control port; a taken port is `PORT_IN_USE`, never a silent fallback and never a signature/network failure |
+| **D86** | `IGromServer.superSaveConfig` (API 9) + `SuperServerConfigInput`: a host configures the data plane with the screen's own validation, and `SuperServerHost` never binds a plane it was not asked to start |
+| **D87** | the peripheral flavour excludes `jniLibs`: 39 MB → 2.2 MB, because that role never executes the agent |
+
+`docs/TWO-IN-ONE.md` is the guide: modules, runtime, port, consent, foreground
+start, boot, battery, data plane, coexistence with a standalone Grom, and the
+codes a host must handle.
+
+Gate: `tools/run-gates` **13/13** (new `tools/check-flavours`), policy **51/51**
+(#49 port choice, #50 one validation contract, #51 lean peripheral),
+`ControlPortTest` **5**, `SuperServerConfigInputTest` **10**, `check-flavours`
+**8/8**, lint 0/0.
+
+Not closed by this phase: no host application was built against this repository
+in CI (the two `testapps` only prove the signing gate); a companion-install model
+(two APKs, one flow) still needs a trust decision, because a third-party host
+cannot sign with Grom's key; and the runtime is still arm64-only.

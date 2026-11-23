@@ -37,7 +37,7 @@ The release workflow therefore publishes:
 | asset | role |
 |---|---|
 | `grom-server29.apk` | full server role, Android 10+ |
-| `grom-peripheral26.apk` | peripheral role, Android 8+, never binds a socket |
+| `grom-peripheral26.apk` | peripheral role, Android 8+, never binds a socket and ships no Node runtime (D87) |
 | `SHA256SUMS` | checksums (recommended with a direct download link) |
 
 The version lives in the tag (`vX.Y.Z`), the release title, `BuildConfig` and

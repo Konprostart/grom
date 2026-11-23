@@ -3,10 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D84 and S1-R002…S1-R045,
-# S5-R001…S5-R053.
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D87 and S1-R002…S1-R046,
+# S5-R001…S5-R055.
 #
-# The gate is intentionally a fixed count: "48/48" is the number of passes.
+# The gate is intentionally a fixed count: "51/51" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -285,7 +285,28 @@ check "the doctor block is three fields and stays out of the exports" \
 #     kept its own literal that nobody bumped. The runtime must therefore report
 #     the SDK constant and carry no numeric literal of its own.
 check "the runtime reports the SDK's API version, not its own literal" \
-  bash -c "grep -q 'override fun apiVersion(): Int = GromClient.API_VERSION' $MAIN/ServerRuntime.kt && ! grep -qE 'override fun apiVersion\(\): Int = [0-9]' $MAIN/ServerRuntime.kt && grep -q 'const val API_VERSION: Int = 8' sdk/src/main/java/app/grom/sdk/GromClient.kt"
+  bash -c "grep -q 'override fun apiVersion(): Int = GromClient.API_VERSION' $MAIN/ServerRuntime.kt && ! grep -qE 'override fun apiVersion\(\): Int = [0-9]' $MAIN/ServerRuntime.kt && grep -q 'const val API_VERSION: Int = 9' sdk/src/main/java/app/grom/sdk/GromClient.kt"
+
+# 49. a phone can hold two Groms (D85). The embedding host must be able to pick
+#     the loopback control port, and a port that is taken must be reported as
+#     PORT_IN_USE — not as a signature or network failure. The probe and the
+#     refusal code are the seam both the host and the tests agree on.
+check "the control port is host-choosable and a conflict is named" \
+  bash -c "grep -q 'val controlPort: Int? = null' $MAIN/embed/GromEmbed.kt && grep -q 'GromPrefs.setPort' $MAIN/embed/GromEmbed.kt && grep -q 'ControlPort.refusal' $MAIN/embed/GromEmbed.kt && grep -q 'ControlPort.PORT_IN_USE' $MAIN/ServerRuntime.kt && grep -q 'const val PORT_IN_USE' $MAIN/core/ControlPort.kt"
+
+# 50. a host configures the data plane through one contract (D86). The Binder
+#     path and the standalone screen must not be two policies: the runtime may
+#     only produce a saved config through SuperServerConfigInput.parse, whose
+#     refusals are the screen's own. The returned status carries passwordSet and
+#     key ids, never a hash or a secret.
+check "host config save goes through the screen's one validation contract" \
+  bash -c "grep -q 'SuperServerConfigInput.parse(raw, port)' $MAIN/ServerRuntime.kt && grep -q 'String superSaveConfig' $AIDL && grep -q 'superSaveConfig' $MAIN/service/GromService.kt && grep -q 'fun saveConfig' $MAIN/superserver/SuperServerHost.kt && grep -q '\"passwordSet\"' $MAIN/superserver/SuperServerHost.kt && ! grep -q '\"passwordHash\" to' $MAIN/superserver/SuperServerHost.kt"
+
+# 51. the peripheral role carries no runtime it never executes (D87). The
+#     exclusion is per variant, so moving the libraries back into a shared
+#     source set cannot silently grow the peripheral APK by ~91 MB.
+check "the peripheral flavour excludes the native runtime it never runs" \
+  bash -c "grep -q 'withFlavor(\"role\" to \"peripheral26\")' app/build.gradle.kts && grep -q 'packaging.jniLibs.excludes' app/build.gradle.kts"
 
 echo
 TOTAL=$((PASS + FAIL))

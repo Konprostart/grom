@@ -77,7 +77,7 @@ signature get all of them in F1. The interface also declares
 ### S4-R012
 `apiVersion()` returns `1` for F1. Clients MUST check it before assuming a
 method exists. API 2 returns `2` (S4-R028). Each later API section states the
-value it adds; the current contract is API 8, so the value is `8` (§13).
+value it adds; the current contract is API 9, so the value is `9` (§14).
 
 ### S4-R013
 `auditTail(int)` clamps `maxEntries` to 1…200, matching S2-R018.
@@ -124,7 +124,7 @@ matching signature is sufficient.
 ### S4-R021
 `testapps/samecert` is signed with the Grom test key. On a device where Grom is
 installed, it MUST bind and its listener MUST fire `onConnected(apiVersion)` with
-the contract version the server implements (`8` in API 8, §13).
+the contract version the server implements (`9` in API 9, §14).
 
 ### S4-R022
 `testapps/foreigncert` is signed with a different key. `bindService` MUST return
@@ -392,3 +392,22 @@ measured without it), MUST contain no credential, identifier, address or free
 text, and MUST pass the same per-transaction signature gate as every other
 method (S4-R007). A client MUST be able to tell `unknown` from a measured `false`
 without parsing a sentence.
+
+## 14. API 9 — host-configured data plane (D85, D86)
+
+`apiVersion()` returns `9`. API 9 is additive: every API 1–8 method is
+unchanged. It adds one method:
+
+```aidl
+String superSaveConfig(String json);
+```
+
+### S4-R051 (API 9)
+`superSaveConfig(json)` MUST accept only a `SuperServerConfig.toJson()` document,
+MUST validate it through the same contract the standalone screen uses (so a
+refusal carries the screen's own stable code), MUST NOT write anything on
+refusal, and MUST apply the document only when the data plane has been started.
+It MUST return the sanitised status (`passwordSet`, key ids) and MUST NOT return
+the stored password hash or any secret. It MUST pass the same per-transaction
+signature gate as every other method (S4-R007), and `apiVersion()` MUST still
+report `GromClient.API_VERSION` rather than a literal.

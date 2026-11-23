@@ -1327,3 +1327,69 @@ at request time from a cheap two-call probe, never cached at start.
 without turning the status document into a device fingerprint.
 
 *Enforced by:* `tools/test-policy` #47, `DoctorFacadeTest`, `DoctorDocumentTest`.
+
+## D85 — the control port belongs to the host, and a conflict is named
+**ACCEPTED.** One phone may hold more than one Grom: the standalone server and a
+host application that embeds `:engine` are separate packages, so they have
+separate data, separate tokens and separate node identities. They do not have
+separate default ports. `GromEmbed.Options.controlPort` (and
+`GromEmbed.setControlPort`) lets the host choose the loopback control port before
+the service starts, and the start is refused with the stable code `PORT_IN_USE`
+when something already holds it. The runtime also maps a bind conflict to the same
+code, so the trace is never "signature rejected" or "network failure".
+
+**No silent fallback.** A server that moved itself to another port would break
+every client that knows the old one — the hub's tunnel target, a paired device,
+`tools/grom-fleet`. The standalone app therefore keeps 47001 and reports the
+conflict honestly instead of hiding it.
+
+The probe (`core/ControlPort`) is advisory: the authoritative answer is still the
+bind. It exists so the failure arrives before the process starts, with a name.
+
+*Why not one shared server for both apps:* sharing requires a second trust
+relation — an IPC permission that is not "same signature" — which is exactly the
+gate S4-R007 and D15 exist to keep closed. Two servers, two ports, is the smaller
+and safer change.
+
+*Enforced by:* `ControlPortTest` (probe agrees with a real bind; two listeners
+cannot share a port; two distinct ports coexist), `tools/test-policy` #49.
+
+## D86 — a host configures the data plane through the screen's own contract
+**ACCEPTED.** `IGromServer.superSaveConfig(String)` (API 9) accepts the
+`SuperServerConfig.toJson()` document, validates it through
+`SuperServerConfigInput.parse` — which runs `SuperServerConfig.validate`, the
+screen's exact contract, plus the same 64 KiB cap as the store — persists it
+atomically and applies it if the plane is started. A refusal is a `400` with the
+same stable code the screen would show (`PORT_CONFLICT`, `CREDENTIAL_REQUIRED`,
+`INSECURE_BACKEND_URL`, …) and **nothing is written**.
+
+A plaintext password is not accepted: the document carries `passwordHash`, and a
+host that wants password auth hashes with `PasswordHash.hash` first. The returned
+status is the sanitised one — `passwordSet` and key ids, never the hash.
+
+`SuperServerHost` now tracks whether it was started, so saving a document can
+never bind a listener the runtime has not started. Before this, `reload()` on a
+stopped plane would have started one.
+
+*Why not a `GromEmbed` option with a typed builder:* the screen would need the
+same change or the two paths would diverge again. One document type, one
+validation function, two callers.
+
+*Enforced by:* `SuperServerConfigInputTest` (every refusal is the screen's code),
+`tools/test-policy` #50, `GromClientContractTest` (API 9).
+
+## D87 — the peripheral role ships no runtime it never executes
+**ACCEPTED.** `peripheral26` has no listener, starts no agent and never executes
+`libnode.so`, yet it carried the whole ~91 MB arm64 runtime because the files live
+in `src/main/jniLibs`. The variant now excludes `jniLibs` and the debug APK drops
+from ~39 MB to ~2.2 MB. The files stay where
+`scripts/build-node-android.sh --install` documents them, so the server role and
+an embedding host keep the runtime they execute.
+
+*Why not move the files to `src/server29/jniLibs`:* every documented command,
+script and doc points at the current path, and moving them would break the
+operator's flow to save one build-configuration line. The exclusion is per
+variant, which is the narrowest place for the decision.
+
+*Enforced by:* `tools/check-flavours` (the built APKs, not the build script),
+`tools/test-policy` #51.

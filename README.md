@@ -62,6 +62,7 @@ second process (D58).
 | Devices on a device | **open** — pairing has never been exercised between two physical phones |
 | Doctor (why Android stops the server) | **delivered in code** — measured checks, honest `unknown`, run marker, API 8, three booleans in `/v1/status` (D80–D84) |
 | Doctor on a device | **open** — no physical phone has been measured |
+| "2 in 1" (host app ships Grom) | **delivered in code** — host-chosen control port, host-configured data plane (API 9), a 2.2 MB peripheral build; guide in `docs/TWO-IN-ONE.md` (D85–D87) |
 
 When the runtime is genuinely absent, the app reports `MISSING_RUNTIME` and the
 agent endpoints answer `503` naming the missing file. That is the designed
@@ -139,7 +140,7 @@ gradle :app:assembleServer29Release :app:assemblePeripheral26Release
 ## Conformance
 
 ```bash
-tools/run-gates                           # all 12 gates, in order
+tools/run-gates                           # all 13 gates, in order
 gradle :engine:testDebugUnitTest          # engine: supervisor, HTTP, data plane, SSH
 gradle :app:testServer29DebugUnitTest     # app: dashboard projection, update check
 gradle :app:lint                          # lint, 0 errors required
@@ -311,8 +312,15 @@ when (val write = project.put("theme", "dark")) {
 
 That namespace (`p:<projectId>:<key>`, API 4 `projectExec`) is an ownership gate
 on the API, not a sandbox between apps in the same UID. See
-[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the IPC surface (API 4, 5 and 6), the
+[`docs/EMBEDDING.md`](docs/EMBEDDING.md) for the IPC surface (API 4 to 9), the
 runtime requirement and the trust-boundary cost.
+
+Shipping "2 in 1" — the app and the server in one package — has its own guide:
+[`docs/TWO-IN-ONE.md`](docs/TWO-IN-ONE.md). It covers the control port a host
+must choose (D85), configuring the public data plane through the Binder (D86),
+the ~38 MB runtime and the peripheral build that ships none of it (D87), the
+Android 12+ foreground-service rules, the battery exemption, and what happens
+when the operator also has the standalone Grom installed.
 
 ## How Grom works
 

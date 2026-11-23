@@ -171,3 +171,13 @@ writable.
 ### S2-R038
 No request handler may block the accept loop; a slow client must not stall the
 server beyond the idle timeout.
+
+## 7. Two servers on one device (D85)
+
+### S2-R039
+The loopback control port MUST be choosable by the host that starts the server,
+and the default MUST stay 47001. When the port is held by another process, the
+bind MUST fail with the stable code `PORT_IN_USE` carried in
+`ApiException`/`lastError`; the server MUST NOT fall back to another port, bind a
+non-loopback address or continue without a listener. The runtime MUST NOT start
+its tick loop, the public data plane or the agent after a refused bind.
