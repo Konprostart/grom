@@ -11,7 +11,7 @@ import app.grom.sdk.GromClient
  *
  * Signed with the Grom test key, so it must be granted the signature permission
  * and must receive a working Binder. Expected result on device:
- *   CONNECTED api=1
+ *   CONNECTED api=8      (the current contract version; older servers answer lower)
  */
 class MainActivity : Activity() {
 

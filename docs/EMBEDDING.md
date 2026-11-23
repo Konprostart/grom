@@ -99,7 +99,7 @@ missing. Ask the server for the truth:
 ```kotlin
 val client = GromEmbed.newClient(context)   // Target.EMBEDDED
 client.bind(object : GromClient.Listener {
-    override fun onConnected(apiVersion: Int) { /* apiVersion == 7 */ }
+    override fun onConnected(apiVersion: Int) { /* apiVersion == 8 */ }
     override fun onDisconnected(reason: String) { /* show the reason */ }
 })
 val status = client.call(null) { it.statusJson() }
@@ -124,7 +124,7 @@ disk.
 
 ---
 
-## 4. The IPC surface (API 4, 5 and 6)
+## 4. The IPC surface (API 4 to 8)
 
 | Method | Purpose |
 |---|---|
@@ -139,6 +139,7 @@ disk.
 | `notifySettingsJson()` … `notifyTestJson()` | **API 5**: the operator's Telegram alerts (D65) |
 | `nodeIdentityJson()` … `peerRefreshJson()` | **API 6**: the device identity, mutual pairing and the paired-device roster (D70–D75) |
 | `peerGrantJson(json)` | **API 7**: one-way trust for an inbound reader such as a VPS hub (D76–D78) |
+| `doctorJson()` | **API 8**: one measured Doctor report — read-only, works while the server is stopped, contains no credential or address (D80–D84) |
 
 Every method runs the same per-transaction signature check as API 1 and 2. A
 foreign certificate still never reaches the server state.
@@ -226,7 +227,7 @@ Binder contract instead, which requires the same signing certificate.
 
 ---
 
-## 6. What the engine does not do
+## 7. What the engine does not do
 
 * It does not draw any UI. Grom's screens in `:app` are a reference, not part of
   the library.

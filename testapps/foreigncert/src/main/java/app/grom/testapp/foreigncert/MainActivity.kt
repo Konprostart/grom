@@ -13,8 +13,6 @@ import app.grom.sdk.GromClient
  * signature-level permission and no Binder may ever arrive. Expected result on
  * device:
  *   REFUSED: bindService returned false
- * or
- *   REFUSED: signature rejected
  */
 class MainActivity : Activity() {
 

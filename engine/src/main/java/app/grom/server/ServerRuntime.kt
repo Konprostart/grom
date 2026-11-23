@@ -51,6 +51,7 @@ import app.grom.server.superserver.AuthMode
 import app.grom.server.superserver.ConfigExport
 import app.grom.server.superserver.SuperServerConfig
 import app.grom.server.superserver.SuperServerHost
+import app.grom.sdk.GromClient
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -275,7 +276,15 @@ class ServerRuntime(
 
     // ------------------------------------------------------------------ GromApi
 
-    override fun apiVersion(): Int = 7
+    /**
+     * The contract version this runtime implements.
+     *
+     * It is the SDK's own constant, not a literal: before this was shared the
+     * number drifted twice (`apiVersion()` answered 3 while the contract said 5,
+     * then 7 while it said 8), and a client that gates on `>= N` silently keeps
+     * the old behaviour. `tools/test-policy` also pins the plumbing.
+     */
+    override fun apiVersion(): Int = GromClient.API_VERSION
 
     override fun authorize(candidate: String?): Boolean =
         candidate != null && Token.matches(token, candidate)

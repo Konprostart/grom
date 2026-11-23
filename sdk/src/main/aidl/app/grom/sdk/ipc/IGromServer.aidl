@@ -22,7 +22,7 @@ package app.grom.sdk.ipc;
  */
 interface IGromServer {
 
-    /** API version; API 7 adds the one-way scoped grant for an inbound reader. */
+    /** API version; this revision implements API 8 (the measured Doctor report). */
     int apiVersion();
 
     /** Same JSON document as GET /grom/v1/health. */

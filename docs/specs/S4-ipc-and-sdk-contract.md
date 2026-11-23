@@ -76,7 +76,8 @@ signature get all of them in F1. The interface also declares
 
 ### S4-R012
 `apiVersion()` returns `1` for F1. Clients MUST check it before assuming a
-method exists. API 2 returns `2` (S4-R028).
+method exists. API 2 returns `2` (S4-R028). Each later API section states the
+value it adds; the current contract is API 8, so the value is `8` (§13).
 
 ### S4-R013
 `auditTail(int)` clamps `maxEntries` to 1…200, matching S2-R018.
@@ -106,6 +107,14 @@ listener, never by polling `isBound` in a loop.
 A dead Binder (`DeadObjectException`) MUST be reported via the listener as a
 disconnect, not crash the client.
 
+A **null binding** MUST be reported as *the service refused to start*, never as
+a signature failure. A foreign certificate is refused by the platform before
+`onBind` runs and surfaces as `bindService` returning false (S4-R008/S4-R009),
+so a null binding can only mean the service's `onBind` returned null — which the
+server role does when the runtime cannot start, for example because another
+server already holds the loopback control port. Naming the wrong cause sends an
+integrator after a signature problem that does not exist.
+
 ### S4-R020
 The SDK MUST NOT require any permission in the client manifest. Holding a
 matching signature is sufficient.
@@ -114,7 +123,8 @@ matching signature is sufficient.
 
 ### S4-R021
 `testapps/samecert` is signed with the Grom test key. On a device where Grom is
-installed, it MUST bind and read `apiVersion() == 1`.
+installed, it MUST bind and its listener MUST fire `onConnected(apiVersion)` with
+the contract version the server implements (`8` in API 8, §13).
 
 ### S4-R022
 `testapps/foreigncert` is signed with a different key. `bindService` MUST return
@@ -357,6 +367,22 @@ refused with `PEER_SELF`. At least one known scope is required
 MUST never be probed, and MUST resolve to a `Principal.Peer` with exactly those
 scopes — never to an operator. Every API 7 method MUST pass the same
 per-transaction signature gate (S4-R007).
+
+## 13. API 8 — measured Doctor diagnostics (D80–D84)
+
+`apiVersion()` returns `8`. API 8 is additive: every API 1–7 method is
+unchanged. It adds one method:
+
+```aidl
+String doctorJson();
+```
+
+The value is a single integer that names the whole contract, so a client MUST
+compare it before calling an API 8 method (S4-R028). The runtime reports the
+constant `GromClient.API_VERSION` rather than a literal of its own: the number
+drifted twice — `3` while the contract said 5, then `7` while it said 8 —
+because two places were kept in step by hand. `tools/test-policy` now pins the
+single-source rule.
 
 ### S4-R050 (API 8)
 `doctorJson()` MUST return one measured Doctor report: a verdict, the ordered

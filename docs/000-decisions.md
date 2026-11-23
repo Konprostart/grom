@@ -193,6 +193,17 @@ stays verifiable across files.
 **ACCEPTED.** `GET /grom/v1/health` returns `api: 1`. `IGromServer.apiVersion()`
 returns `1`. App version is `versionName`; they move independently.
 
+*Amended (0.13.1):* the Binder value has **one source** —
+`GromClient.API_VERSION` — and `ServerRuntime.apiVersion()` returns that
+constant instead of a literal. The literal drifted twice: it answered `3` while
+the contract said 5, then `7` while it said 8 (which is what `doctorJson()`
+shipped as). A client gating on `>= N` cannot distinguish "the server is old"
+from "the server forgot to bump", so the number must not live in two files.
+`tools/test-policy` 48 pins the rule, and S4 §13 now names the API 8 value the
+contract had omitted.
+
+*Enforced by:* `tools/test-policy` 48, `GromClientContractTest`.
+
 ## D30 — Policy logic is JVM-testable, no Robolectric
 **ACCEPTED.** Bind policy, token, audit chain, supervisor state machine, health
 gate, redaction and agent config are plain Kotlin with no Android imports.

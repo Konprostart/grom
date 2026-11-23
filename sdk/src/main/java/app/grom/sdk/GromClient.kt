@@ -64,10 +64,16 @@ class GromClient(
         }
 
         override fun onNullBinding(name: ComponentName?) {
-            // The signature gate refused the caller (S4-R008).
+            // `onNullBinding` means the service's `onBind` returned null, which
+            // GromService does when the runtime cannot start (for example a
+            // control port already held by another server). It is *not* the
+            // signature gate: a foreign certificate is refused earlier, by the
+            // platform, and shows up as `bindService` returning false
+            // (S4-R008/S4-R009). The old text here claimed "signature rejected",
+            // which sent an integrator hunting the wrong cause.
             server = null
             bound = false
-            listener?.onDisconnected("signature rejected")
+            listener?.onDisconnected("the service refused to start")
         }
 
         override fun onBindingDied(name: ComponentName?) {
