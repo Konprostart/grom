@@ -195,4 +195,21 @@ class DoctorModelTest {
         val line = facts.first { it.labelRes == app.grom.server.R.string.doctor_fact_unexpected_stops }
         assertTrue(line.valueText.startsWith("2"))
     }
+
+    /**
+     * The screen keeps its own copy of the check ids so it stays pure. That copy
+     * is only safe if something notices when the engine's vocabulary changes:
+     * a new engine check whose id the screen does not know would render as
+     * "unknown", and a renamed id would lose its row entirely.
+     */
+    @Test
+    fun `the screen's ids and order match the engine rules`() {
+        assertEquals(app.grom.server.doctor.DoctorRules.ORDER, DoctorModel.ORDER)
+        for (id in app.grom.server.doctor.DoctorRules.ORDER) {
+            assertNotEquals(
+                app.grom.server.R.string.doctor_check_unknown,
+                DoctorModel.titleRes(id)
+            )
+        }
+    }
 }

@@ -42,7 +42,12 @@ object FleetModel {
         }
     }
 
-    /** One line for the section header: "2 paired · 1 connected". */
+    /**
+     * The section header count: `"alive/paired"`, e.g. `"1/2"`.
+     *
+     * Only a measured `alive` counts as connected; a stored pairing that has
+     * never answered stays in the denominator and never turns green.
+     */
     fun summary(peers: List<Map<String, Any?>>): String {
         val alive = peers.count { it["state"] == "alive" }
         return "$alive/${peers.size}"

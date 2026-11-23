@@ -61,6 +61,9 @@ class PeerStoreTest {
         val second = store.add(
             first.copy(grantedByMe = setOf(PeerScope.STATUS_READ), label = "Renamed")
         )
+        // Re-pairing is an update, not a second record: the identity is derived
+        // from the key, so it cannot drift between the two.
+        assertEquals(first.nodeId, second.nodeId)
         assertEquals(1, store.list().size)
         assertEquals("Renamed", store.find(first.nodeId)?.label)
         assertEquals(setOf(PeerScope.STATUS_READ), store.find(first.nodeId)?.grantedByMe)
@@ -120,7 +123,7 @@ class PeerStoreTest {
     @Test
     fun `a corrupt file reads as empty and is not deleted`() {
         val file = File(temp.root, PeerStore.FILE_NAME)
-        file.parentFile.mkdirs()
+        file.parentFile?.mkdirs()
         file.writeText("{not json")
         val store = store()
         assertTrue(store.list().isEmpty())
@@ -131,7 +134,7 @@ class PeerStoreTest {
     @Test
     fun `a record that fails validation is skipped`() {
         val file = File(temp.root, PeerStore.FILE_NAME)
-        file.parentFile.mkdirs()
+        file.parentFile?.mkdirs()
         val good = peer(seedA)
         file.writeText(
             "{\"version\":1,\"peers\":[" +

@@ -112,7 +112,7 @@ class NodeIdentityStoreTest {
     @Test
     fun `an over-size file is refused before it is parsed`() {
         val file = File(temp.root, NodeIdentityStore.FILE_NAME)
-        file.parentFile.mkdirs()
+        file.parentFile?.mkdirs()
         file.writeText("x".repeat(NodeIdentityStore.MAX_FILE_BYTES + 10))
         val store = store()
         assertNull(store.identity())
