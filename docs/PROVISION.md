@@ -215,7 +215,9 @@ never restarts a phone.
 Both changes are **re-read** afterwards, so the report says what the phone now
 reports rather than what the tool asked for. If a vendor silently ignores the
 whitelist request, the second read still says `no` and the exit code stays `1` —
-the tool does not get to declare success on your behalf.
+the tool does not get to declare success on your behalf. The table therefore
+prints `attempted: DOCTOR_FIX_…`, never `fixed:`; the re-read lines above it are
+the only claim of state.
 
 The suite enforces this structurally: every invocation the tool issues must match
 a fixed allow-list (`ALLOWED_COMMAND_PREFIXES` in the source), so a command

@@ -1699,8 +1699,12 @@ public final class GromProvision {
             System.out.println("  " + line("max phantom processes", orUnknown(r.maxPhantomProcesses)));
             System.out.println("  " + line("phantom monitor", orUnknown(r.phantomMonitor)));
             System.out.println("  " + line("wifi sleep policy", orUnknown(r.wifiSleepPolicy)));
+            // "attempted", not "fixed": a vendor build is free to ignore the
+            // request, and the lines above are the re-read truth. Claiming a
+            // change took before reading the phone back is exactly the kind of
+            // false green this project refuses everywhere else.
             for (String fix : r.fixes) {
-                System.out.println("  fixed: " + fix);
+                System.out.println("  attempted: " + fix);
             }
             if (r.findings.isEmpty()) {
                 System.out.println("  findings: none");
@@ -2604,8 +2608,10 @@ public final class GromProvision {
             String withFix = invocations(scen);
             check("doctor: --fix whitelists the package",
                     withFix.contains("dumpsys deviceidle whitelist +app.grom.server"));
-            check("doctor: --fix reports the fix it applied",
-                    fixed.out().contains("DOCTOR_FIX_WHITELIST"));
+            check("doctor: --fix reports what it attempted",
+                    fixed.out().contains("DOCTOR_FIX_WHITELIST")
+                            && fixed.out().contains("attempted: DOCTOR_FIX_WHITELIST")
+                            && !fixed.out().contains("fixed: DOCTOR_FIX_WHITELIST"));
             // The appops deny must survive: --fix is not allowed to touch app-ops.
             check("doctor: --fix leaves app-ops alone",
                     !withFix.contains("appops set") && !withFix.contains("appops write"));
