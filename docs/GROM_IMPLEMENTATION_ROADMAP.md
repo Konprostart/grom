@@ -570,7 +570,8 @@ codes a host must handle.
 Gate: `tools/run-gates` **13/13** (new `tools/check-flavours`), policy **51/51**
 (#49 port choice, #50 one validation contract, #51 lean peripheral),
 `ControlPortTest` **5**, `SuperServerConfigInputTest` **10**, `check-flavours`
-**8/8**, lint 0/0.
+**8/8** with the runtime installed (6/6 and an explicit note without it), lint
+0/0.
 
 Not closed by this phase: no host application was built against this repository
 in CI (the two `testapps` only prove the signing gate); a companion-install model

@@ -338,6 +338,6 @@ with its own scopes. Both can be paired into the same roster.
 | one API version, from the SDK | `tools/test-policy` #48, `GromClientContractTest` |
 | control port is choosable, conflicts are named | `ControlPortTest`, `tools/test-policy` #49 |
 | host config uses the screen's contract | `SuperServerConfigInputTest`, `tools/test-policy` #50 |
-| the peripheral role carries no runtime | `tools/check-flavours`, `tools/test-policy` #51 |
+| the peripheral role carries no runtime | `tools/check-flavours` (built APKs; the release workflow asserts it on the shipped ones), `tools/test-policy` #51 |
 | every IPC method passes the signature gate | `tools/test-policy` #15, `tools/verify-ipc-signing` |
 | no address or secret in a status document | `tools/test-policy` #24, #47; `ConfigExportTest` |

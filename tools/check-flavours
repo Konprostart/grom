@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
 # check-flavours — each role flavour carries what its role actually runs (D87).
 #
-# server29 executes the arm64 Node agent, so its APK must contain the runtime.
-# peripheral26 has no listener and never starts the agent, so it must not carry
-# the ~91 MB of arm64 libraries just because they live in `src/main/jniLibs`.
+# server29 executes the arm64 Node agent, so a build that has the runtime must
+# put it in its APK. peripheral26 has no listener and never starts the agent, so
+# it must not carry the ~91 MB of arm64 libraries just because they live in
+# `src/main/jniLibs`.
 #
 # The exclusion is one line in app/build.gradle.kts and is invisible until
-# someone moves the files back, so it is verified here against the built APKs —
-# not against the intent in the build script.
+# someone moves the files back, so it is verified against the built APKs — not
+# against the intent in the build script.
+#
+# The repository holds no binaries (D35), so a clean CI checkout builds both
+# APKs *without* the runtime. In that case the "server ships it" half cannot be
+# observed here and is reported as such; the release workflow installs the
+# runtime and asserts the shipped APKs, and `tools/test-policy` #51 pins the rule
+# itself. The "peripheral ships none" half is checked every time.
 #
 # Exits non-zero if any check fails.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-SERVER_APK="app/build/outputs/apk/server29/debug/app-server29-debug.apk"
-PERIPHERAL_APK="app/build/outputs/apk/peripheral26/debug/app-peripheral26-debug.apk"
+# Overridable so the no-runtime branch can be exercised in a test.
+SERVER_APK="${SERVER_APK:-app/build/outputs/apk/server29/debug/app-server29-debug.apk}"
+PERIPHERAL_APK="${PERIPHERAL_APK:-app/build/outputs/apk/peripheral26/debug/app-peripheral26-debug.apk}"
 
 FAIL=0
 PASS=0
@@ -43,27 +51,35 @@ if [ "$FAIL" -ne 0 ]; then
   exit 1
 fi
 
-# --- the server role ships the runtime it executes ----------------------------
-check "server29 ships libnode.so in the native library dir" \
-  bash -c "unzip -Z1 '$SERVER_APK' | grep -qx 'lib/arm64-v8a/libnode.so'"
-check "server29 ships the agent script" \
-  bash -c "unzip -Z1 '$SERVER_APK' | grep -qx 'assets/node/grom-agent.js'"
-
-# --- the peripheral role ships none of it ------------------------------------
+# --- the peripheral role ships none of the runtime ----------------------------
 LIB_ENTRIES="$(unzip -Z1 "$PERIPHERAL_APK" | grep -c '^lib/' || true)"
 check "peripheral26 ships no native libraries (found $LIB_ENTRIES)" \
   test "$LIB_ENTRIES" -eq 0
 check "peripheral26 does not hide the runtime under another directory" \
   bash -c "! unzip -Z1 '$PERIPHERAL_APK' | grep -q 'libnode'"
 check "peripheral26 carries no extractable arm64 objects" \
-  bash -c "! unzip -Z1 '$PERIPHERAL_APK' | grep -qE 'arm64-v8a|\\.so$'"
+  bash -c "! unzip -Z1 '$PERIPHERAL_APK' | grep -qE 'arm64-v8a|\.so$'"
 
-# --- the role split is real, not a naming convention -------------------------
+# --- the server role ships the runtime it executes ---------------------------
 SERVER_BYTES="$(stat -c %s "$SERVER_APK" 2>/dev/null || stat -f %z "$SERVER_APK")"
 PERIPHERAL_BYTES="$(stat -c %s "$PERIPHERAL_APK" 2>/dev/null || stat -f %z "$PERIPHERAL_APK")"
 echo "  ..   server29 ${SERVER_BYTES} B · peripheral26 ${PERIPHERAL_BYTES} B"
-check "the peripheral APK is less than a quarter of the server APK" \
-  test "$PERIPHERAL_BYTES" -lt $((SERVER_BYTES / 4))
+
+if unzip -Z1 "$SERVER_APK" | grep -qx 'lib/arm64-v8a/libnode.so'; then
+  check "server29 ships libnode.so in the native library dir" true
+  check "server29 ships the agent script" \
+    bash -c "unzip -Z1 '$SERVER_APK' | grep -qx 'assets/node/grom-agent.js'"
+  check "the peripheral APK is less than a quarter of the server APK" \
+    test "$PERIPHERAL_BYTES" -lt $((SERVER_BYTES / 4))
+else
+  # Not a failure: the checkout has no binaries (D35). Say so instead of
+  # pretending the check ran.
+  echo "  ..   server29 has no native libraries in this build: the arm64 runtime"
+  echo "       is not installed in this checkout. The release workflow asserts it"
+  echo "       on the shipped artifacts and tools/test-policy #51 pins the rule."
+  check "peripheral26 is not larger than the server APK" \
+    test "$PERIPHERAL_BYTES" -le "$SERVER_BYTES"
+fi
 
 echo
 if [ "$FAIL" -ne 0 ]; then

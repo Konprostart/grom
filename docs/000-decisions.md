@@ -1392,4 +1392,8 @@ operator's flow to save one build-configuration line. The exclusion is per
 variant, which is the narrowest place for the decision.
 
 *Enforced by:* `tools/check-flavours` (the built APKs, not the build script),
-`tools/test-policy` #51.
+`tools/test-policy` #51. The repository ships no binaries (D35), so a clean CI
+checkout builds both APKs without the runtime: `check-flavours` reports that
+explicitly instead of pretending to have checked the server half, and the
+release workflow — which installs the runtime — asserts that `server29` contains
+`libnode.so` and `peripheral26` contains no `lib/` entry at all.
