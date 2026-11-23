@@ -296,13 +296,26 @@ class TelegramNotifierTest {
     }
 
     @Test
-    fun `closing stops the worker`() {
+    fun `closing stops the worker and is idempotent`() {
+        // The worker used to be closed by nobody at all: one `grom-notify` thread
+        // per service instance stayed alive for the rest of the process, which is
+        // a slow leak in a host that stops and starts the embedded server (D66).
+        val before = notifyThreads()
         val created = notifier(store(), FakeTransport())
+        assertEquals("the worker is running while the notifier is open", before + 1, notifyThreads())
+
         val failure = AtomicInteger(0)
         created.close()
-        // A second close is harmless, and the object is unusable but not broken.
+        assertEquals("close must join the worker", before, notifyThreads())
+
+        // A second close is harmless, and a closed notifier still refuses work
+        // without throwing into the audit path.
         runCatching { created.close() }.onFailure { failure.incrementAndGet() }
+        runCatching { created.onAudit("server.start", "") }.onFailure { failure.incrementAndGet() }
         notifier = null
         assertEquals(0, failure.get())
     }
+
+    private fun notifyThreads(): Int =
+        Thread.getAllStackTraces().keys.count { it.isAlive && it.name == "grom-notify" }
 }

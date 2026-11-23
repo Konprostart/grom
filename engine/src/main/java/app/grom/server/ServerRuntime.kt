@@ -1098,6 +1098,23 @@ class ServerRuntime(
         notifier.flush(timeoutMs)
     }
 
+    /**
+     * Stops the notification worker (D66).
+     *
+     * Called **after** the final flush, and only at the end of the service's
+     * life: closing earlier would drop the "server stopped" message the worker
+     * is still sending. It used to be called nowhere at all, which left one
+     * `grom-notify` thread per service instance alive for the rest of the
+     * process — invisible in the standalone app (one instance per process) and a
+     * slow leak in a host that stops and starts the embedded server.
+     *
+     * The join is bounded by the notifier, so a delivery stuck on its own
+     * timeout cannot hold `onDestroy` open beyond the documented window.
+     */
+    fun closeNotifications() {
+        runCatching { notifier.close() }
+    }
+
     private fun actor(): String = "api:${tokenFingerprint()}"
 
     private fun redactor(): Redactor = Redactor(listOfNotNull(token.ifEmpty { null }))

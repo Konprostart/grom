@@ -98,6 +98,9 @@ class GromService : Service() {
         // supervisor records it, the worker flushes here, and the wait is
         // bounded so Android's destroy window is respected (D66).
         runtime.flushNotifications(NOTIFY_FLUSH_MS)
+        // After the flush, not before: the worker has finished sending, and it
+        // must not outlive the service it belongs to (D66).
+        runtime.closeNotifications()
         super.onDestroy()
     }
 
