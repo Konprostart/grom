@@ -89,11 +89,17 @@ jobs:
             test -n "$apk"
             out="dist/grom-${flavour}.apk"
             cp "$apk" "$out"
-            unzip -l "$out" | grep -q 'lib/arm64-v8a/libnode.so'
+            # The agent script ships in both roles (it lives in :engine's assets).
             unzip -l "$out" | grep -q 'assets/node/grom-agent.js'
             "$ANDROID_BUILD_TOOLS/apksigner" verify --print-certs "$out" >/dev/null
             echo "verified $out ($(du -h "$out" | cut -f1))"
           done
+          # D87: only the server role executes the runtime, so only it may carry it.
+          unzip -l dist/grom-server29.apk | grep -q 'lib/arm64-v8a/libnode.so'
+          if unzip -l dist/grom-peripheral26.apk | grep -q 'lib/'; then
+            echo "peripheral26 must not ship native libraries (D87)" >&2
+            exit 1
+          fi
           cd dist
           sha256sum ./*.apk > SHA256SUMS
           cat SHA256SUMS
@@ -108,7 +114,7 @@ jobs:
           else
             gh release create "$TAG" dist/*.apk dist/SHA256SUMS \
               --title "Grom ${TAG#v}" \
-              --notes "Android server role (server29) and peripheral role (peripheral26), both with the verified arm64 bionic Node runtime bundled.
+              --notes "Android server role (server29) with the verified arm64 bionic Node runtime bundled, and the peripheral role (peripheral26), which carries no runtime because it never executes the agent (D87).
 
           Download page (one tap, no GitHub account):
 

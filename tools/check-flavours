@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# check-flavours — each role flavour carries what its role actually runs (D87).
+#
+# server29 executes the arm64 Node agent, so its APK must contain the runtime.
+# peripheral26 has no listener and never starts the agent, so it must not carry
+# the ~91 MB of arm64 libraries just because they live in `src/main/jniLibs`.
+#
+# The exclusion is one line in app/build.gradle.kts and is invisible until
+# someone moves the files back, so it is verified here against the built APKs —
+# not against the intent in the build script.
+#
+# Exits non-zero if any check fails.
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+SERVER_APK="app/build/outputs/apk/server29/debug/app-server29-debug.apk"
+PERIPHERAL_APK="app/build/outputs/apk/peripheral26/debug/app-peripheral26-debug.apk"
+
+FAIL=0
+PASS=0
+
+check() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    PASS=$((PASS + 1))
+    echo "  ok   $name"
+  else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL $name" >&2
+  fi
+}
+
+echo "== check-flavours =="
+
+check "server29 APK exists"      test -f "$SERVER_APK"
+check "peripheral26 APK exists"  test -f "$PERIPHERAL_APK"
+
+if [ "$FAIL" -ne 0 ]; then
+  echo
+  echo "build the APKs first:"
+  echo "  gradle :app:assembleServer29Debug :app:assemblePeripheral26Debug"
+  exit 1
+fi
+
+# --- the server role ships the runtime it executes ----------------------------
+check "server29 ships libnode.so in the native library dir" \
+  bash -c "unzip -Z1 '$SERVER_APK' | grep -qx 'lib/arm64-v8a/libnode.so'"
+check "server29 ships the agent script" \
+  bash -c "unzip -Z1 '$SERVER_APK' | grep -qx 'assets/node/grom-agent.js'"
+
+# --- the peripheral role ships none of it ------------------------------------
+LIB_ENTRIES="$(unzip -Z1 "$PERIPHERAL_APK" | grep -c '^lib/' || true)"
+check "peripheral26 ships no native libraries (found $LIB_ENTRIES)" \
+  test "$LIB_ENTRIES" -eq 0
+check "peripheral26 does not hide the runtime under another directory" \
+  bash -c "! unzip -Z1 '$PERIPHERAL_APK' | grep -q 'libnode'"
+check "peripheral26 carries no extractable arm64 objects" \
+  bash -c "! unzip -Z1 '$PERIPHERAL_APK' | grep -qE 'arm64-v8a|\\.so$'"
+
+# --- the role split is real, not a naming convention -------------------------
+SERVER_BYTES="$(stat -c %s "$SERVER_APK" 2>/dev/null || stat -f %z "$SERVER_APK")"
+PERIPHERAL_BYTES="$(stat -c %s "$PERIPHERAL_APK" 2>/dev/null || stat -f %z "$PERIPHERAL_APK")"
+echo "  ..   server29 ${SERVER_BYTES} B · peripheral26 ${PERIPHERAL_BYTES} B"
+check "the peripheral APK is less than a quarter of the server APK" \
+  test "$PERIPHERAL_BYTES" -lt $((SERVER_BYTES / 4))
+
+echo
+if [ "$FAIL" -ne 0 ]; then
+  echo "check-flavours: FAILED ($PASS passed, $FAIL failed)" >&2
+  exit 1
+fi
+echo "check-flavours: OK ($PASS/$PASS)"

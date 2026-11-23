@@ -78,6 +78,7 @@ jobs:
           tools/check-third-party
           tools/test-policy
           tools/verify-ipc-signing
+          tools/check-flavours
 
       - name: Fleet view self-test
         run: ./tools/test-fleet

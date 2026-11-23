@@ -108,6 +108,19 @@ android {
     }
 }
 
+/**
+ * D87: the peripheral role never starts the Node agent, so it must not carry
+ * the ~91 MB arm64 runtime just because the files sit in `src/main/jniLibs`.
+ * The exclusion is applied per variant rather than by moving the files, so
+ * `scripts/build-node-android.sh --install` keeps its documented destination and
+ * the server role keeps the runtime it executes.
+ */
+androidComponents {
+    onVariants(selector().withFlavor("role" to "peripheral26")) { variant ->
+        variant.packaging.jniLibs.excludes.add("**")
+    }
+}
+
 dependencies {
     implementation(project(":engine"))
     implementation(project(":sdk"))
