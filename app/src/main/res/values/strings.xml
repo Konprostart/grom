@@ -448,6 +448,8 @@ Requested: %4$s</string>
     <string name="fleet_grant_label">Name (optional)</string>
     <string name="fleet_grant_scope_status">Read status</string>
     <string name="fleet_grant_scope_config">Read configuration</string>
+    <string name="fleet_grant_scope_services_read">List the services this device runs</string>
+    <string name="fleet_grant_scope_services_call">Call the operations a service publishes</string>
     <string name="fleet_grant_scope_required">Choose at least one scope.</string>
     <string name="fleet_grant_key_required">Paste the reader public key.</string>
     <string name="fleet_granted">Key trusted</string>

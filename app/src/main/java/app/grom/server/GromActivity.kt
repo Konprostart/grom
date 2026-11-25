@@ -2292,10 +2292,22 @@ class GromActivity : Activity() {
             setText(R.string.fleet_grant_scope_config)
             isChecked = false
         }
+        // Services are what an application uses Grom for (D92). They are off by
+        // default and callable only for the operations a service publishes.
+        val servicesReadBox = CheckBox(this).apply {
+            setText(R.string.fleet_grant_scope_services_read)
+            isChecked = false
+        }
+        val servicesCallBox = CheckBox(this).apply {
+            setText(R.string.fleet_grant_scope_services_call)
+            isChecked = false
+        }
         column.addView(keyInput)
         column.addView(labelInput)
         column.addView(statusBox)
         column.addView(configBox)
+        column.addView(servicesReadBox)
+        column.addView(servicesCallBox)
         AlertDialog.Builder(this)
             .setTitle(R.string.fleet_grant_title)
             .setMessage(R.string.fleet_grant_body)
@@ -2309,6 +2321,8 @@ class GromActivity : Activity() {
                 val scopes = buildList {
                     if (statusBox.isChecked) add("status.read")
                     if (configBox.isChecked) add("config.read")
+                    if (servicesReadBox.isChecked) add("services.read")
+                    if (servicesCallBox.isChecked) add("services.call")
                 }
                 if (scopes.isEmpty()) {
                     toast(getString(R.string.fleet_grant_scope_required))
