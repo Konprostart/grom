@@ -498,3 +498,27 @@ The engine MUST remain an ordinary library so a host can embed it, and the
 peripheral role MUST NOT package the native runtime. A packaging change that
 re-adds the runtime to the peripheral role MUST fail a gate rather than only
 enlarge an APK.
+
+### S5-R056 (D91)
+`GET /grom/v1/connect` MUST answer `200` with the discovery document of S6-R004:
+`schema`, `service`, `grom`, `api`, `compat`, `state`, `timeMs`, `dataPlane`,
+`auth`, `principal`, `capabilities`, `services` and `endpoints`. It MUST be
+read-only (`GET` only) and MUST pass the request rate limiter.
+
+### S5-R057 (D91)
+The anonymous document MUST list no service (`services.listed=false` with an
+empty `items`) and MUST NOT contain a token, a password hash, a peer record, an
+`npub`, a chat id or a configuration block. A credential presented to the route
+MUST be verified: an invalid one answers `401 UNAUTHORIZED`, never the anonymous
+document. `/v1/health` MUST remain unchanged and MUST NOT gain the document.
+
+### S5-R058 (D92)
+`services.read` MAY enumerate services through `GET /v1/plugins` and
+`GET /v1/plugins/{id}`, and `services.call` MAY invoke
+`POST /v1/plugins/{id}/rpc`. An RPC op MUST additionally be listed in the
+plugin's `scopedOps`; the default `scopedOps` is empty, so a plugin that does not
+declare a callable operation exposes none. `scopedOps` MUST NOT contain an op
+that reads the full status, changes configuration, or moves funds. A service's
+`status` block MUST be present only for a caller holding `status.read`. Every
+other route — `/v1/events`, `/v1/auth/logout`, pairing, the control plane — MUST
+keep answering `403 SCOPE_REQUIRED` for a scoped peer.

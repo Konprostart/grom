@@ -21,6 +21,7 @@ Task ids (`T-nn`) match §U of the master plan.
 | **1I — Doctor diagnostics** | **done** | `engine/.../doctor/` (facts, rules, report, run marker, one Android probe), API 8, Doctor section in the menu, `doctor`/`--fix` in `tools/grom-provision`, three status booleans; `docs/DOCTOR.md`; D80–D84 |
 | **1J — "2 in 1": host-chosen control port, host-configured data plane, a lean peripheral** | **done** | `core/ControlPort` + `GromEmbed.Options.controlPort` (D85), `superSaveConfig` API 9 + `SuperServerConfigInput` (D86), peripheral `jniLibs` exclusion (D87), `docs/TWO-IN-ONE.md`; `tools/check-flavours` |
 | **1K — "2 in 1" without complications: versioned consent, an automatic port, host-readable health** | **done** | `EmbedConsent` (D88), `ControlPort.resolve` + `GromEmbed.AUTO_PORT` (D89), `EmbedHealth` projection + `GromEmbed.health` (D90), `GromClient.bind(createIfMissing=false)` and a released registration after `onNullBinding`; `docs/TWO-IN-ONE.md` §2, §9 |
+| **1L — universal client connect: discovery, scoped services, a thin SDK** | **done** | `GET /grom/v1/connect` (D91), `services.read`/`services.call` + `Plugin.scopedOps` (D92), `app.grom.sdk.connect` HTTP client + compiled `examples/connect` (D93); `docs/specs/S6-client-connect.md` |
 | **1B — core hardening** | **next** | `apps/AppManifest.kt`, `apps/PortAllocator.kt`, `apps/HealthGate.kt`, `apps/ReleaseStore.kt`, `proc/ChildProcess.kt`, `adapters/`, `auth/Scope.kt` — none exist yet |
 | **2 — Application Manager MVP** | **blocked by 1B** | `apps/ApplicationManager.kt`, `apps/AppSupervisor.kt`, the gateway, `/v1/apps` |
 | **3 — runtimes and adapters** | blocked by 2 | `apps/runtime/`, `adapters/`, LND |
@@ -606,3 +607,30 @@ of which `EmbedHealthTest` **18**, `EmbedConsentTest` **7**, `EmbedSettingsTest`
 Not closed: the companion model (model B in `docs/TWO-IN-ONE.md`) is still out of
 scope — it needs a second trust relation, not code; and no host APK is built
 against the engine in CI.
+
+### Phase 1L — universal client connect — **done**
+
+Grom is usable as a local server without either side inventing a protocol. The
+gap was discovery (there was none) and permissions (a client that needed a
+service had to be handed an operator key):
+
+| decision | change |
+|---|---|
+| **D91** | `GET /grom/v1/connect`: an anonymous base document (schema, api, versions, auth methods, scopes, measured endpoint, route map) that adds the caller's capabilities and the readable service list only with a valid credential; an invalid credential is `401`, never a downgrade |
+| **D92** | `PeerScope.SERVICES_READ`/`SERVICES_CALL` + `Plugin.scopedOps()`, an op-level allow-list with an empty default; `AgentPlugin` publishes `echo`, `kv.get`, `kv.put`, `ping`; `LightningPlugin` publishes nothing |
+| **D93** | `app.grom.sdk.connect`: a dependency-free HTTP client with an injected `GromSigner`, a purpose-built JSON reader/writer, and a `canonicalString` pinned byte-for-byte to the server's `RequestSigner`; `examples/connect` is a compiled, tested module |
+
+`docs/specs/S6-client-connect.md` is the integrator document: discovery,
+compatibility, both authentication mechanisms, scopes, services, RPC, the error
+table, reconnect and the reference code. `/v1/health`, `/v1/status`, `/v1/config`
+and every existing operator route are unchanged; the Binder API stays **9**.
+
+Gate: `tools/run-gates` **13/13**, policy **59/59** (#56 connect route, #57
+scoped services, #58 SDK has no key and no dependency, #59 connect is an
+allow-list), `ConnectRouterTest` **13**, `GromConnectClientTest` **15**,
+`GromJsonTest` **8**, `ConnectExampleTest` **3**, lint 0/0.
+
+Not closed: MCP is not implemented (the RPC already describes and calls a
+service; an adapter can be a separate bridge when an MCP-only client appears);
+`/v1/events` stays operator-only, so a scoped client refreshes on open, not by
+push; and no third-party application has been built against the SDK in CI yet.

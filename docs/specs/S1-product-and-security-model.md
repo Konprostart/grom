@@ -316,3 +316,11 @@ port. A start whose port is already held MUST report the stable code
 `PORT_IN_USE`; it MUST NOT silently move to another port, and it MUST NOT be
 reported as a signature or network failure. The peripheral role MUST NOT package
 the native runtime it never executes.
+
+### S1-R047 (D91, D92)
+An application that uses Grom as a server is a **scoped client**, never an
+operator. It holds only the scopes the operator granted, it is identified by its
+own Ed25519 key (or a password session the operator enabled), it cannot read the
+audit surface, the event stream or the configuration export without the matching
+scope, and it cannot invoke an operation a service does not publish to scoped
+callers. `services.call` MUST NOT be treated as a weaker operator token.

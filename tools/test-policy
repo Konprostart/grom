@@ -3,10 +3,10 @@
 #
 # These are the checks that cannot be expressed as a unit test because they are
 # about the shape of the tree: manifest permissions, absent symbols, headers.
-# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D87 and S1-R002…S1-R046,
-# S5-R001…S5-R055.
+# See D1, D2, D5, D15, D18, D21, D39…D47, D52…D93 and S1-R002…S1-R047,
+# S5-R001…S5-R058, S6-R001…S6-R028.
 #
-# The gate is intentionally a fixed count: "55/55" is the number of passes.
+# The gate is intentionally a fixed count: "59/59" is the number of passes.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -338,6 +338,32 @@ check "every embed code is documented in the 2-in-1 guide" \
 #     that stops and starts the embedded server.
 check "the notification worker is closed after the final flush" \
   bash -c "grep -q 'runtime.closeNotifications()' $MAIN/service/GromService.kt && grep -q 'notifier.close()' $MAIN/ServerRuntime.kt && grep -q 'fun closeNotifications' $MAIN/ServerRuntime.kt"
+
+# 56. a client discovers Grom through one data-plane route (D91). The route is
+#     named once and served from the router; the host supplies the version, so
+#     the document cannot report a version the build did not stamp.
+check "the connect document is a named data-plane route" \
+  bash -c "grep -q 'const val CONNECT: String = \"/grom/v1/connect\"' $MAIN/superserver/SuperRouter.kt && grep -q 'connectDocument' $MAIN/superserver/SuperRouter.kt && grep -q 'gromVersion = version' $MAIN/superserver/SuperServerHost.kt && grep -q 'version = { hostVersion(context) }' $MAIN/ServerRuntime.kt"
+
+# 57. a connected app uses services without becoming an operator (D92). The two
+#     scopes exist, the callable subset is a plugin declaration with an empty
+#     default, the op check runs in the router, and the money adapter publishes
+#     nothing.
+check "scoped services are op-level and never an operator key" \
+  bash -c "grep -q 'SERVICES_READ(\"services.read\")' $MAIN/cluster/PeerRecord.kt && grep -q 'SERVICES_CALL(\"services.call\")' $MAIN/cluster/PeerRecord.kt && grep -q 'fun scopedOps(): Set<String> = emptySet()' $MAIN/superserver/Plugin.kt && grep -q 'op !in plugin.scopedOps()' $MAIN/superserver/SuperRouter.kt && grep -q 'AgentChannel.OPS - \"status\"' $MAIN/superserver/AgentPlugin.kt && grep -q 'override fun scopedOps(): Set<String> = emptySet()' $MAIN/superserver/plugins/lightning/LightningPlugin.kt && grep -q 'canCallServices(principal)' $MAIN/superserver/SuperRouter.kt"
+
+# 58. the client SDK carries no key and no dependency (D93). A host supplies a
+#     GromSigner; the library never generates, stores or exports key material,
+#     imports android.*, or grows a runtime dependency. The canonical string is
+#     compared with the server's by a test, and the example is a real module.
+check "the SDK is dependency-free, key-free and pinned to one signature" \
+  bash -c "! grep -rq '^import android\.' sdk/src/main/java/app/grom/sdk/connect && ! grep -rqE 'generatePrivateSeed|Ed25519\.sign|privateKey' sdk/src/main/java/app/grom/sdk/connect && grep -q 'interface GromSigner' sdk/src/main/java/app/grom/sdk/connect/GromConnectClient.kt && grep -q 'fun canonicalString' sdk/src/main/java/app/grom/sdk/connect/GromConnectClient.kt && grep -q 'canonicalString' engine/src/test/java/app/grom/server/superserver/ConnectRouterTest.kt && ! grep -qE '^[[:space:]]*implementation\(\"' sdk/build.gradle.kts && grep -q 'include(\":examples:connect\")' settings.gradle.kts"
+
+# 59. the connect document is an allow-list (D91). The anonymous answer never
+#     reaches the status projection, the document never appears in the exports,
+#     and health is untouched.
+check "connect lists nothing anonymously and never reuses the status" \
+  bash -c "grep -q 'connectDocument(null)' $MAIN/superserver/SuperRouter.kt && grep -q '\"listed\" to listed' $MAIN/superserver/SuperRouter.kt && ! grep -q 'serverStatus()' <(sed -n '/private fun connectDocument/,/^    }/p' $MAIN/superserver/SuperRouter.kt) && ! grep -q '/grom/v1/connect' $MAIN/superserver/SuperStatusDocument.kt $MAIN/superserver/ConfigExport.kt $MAIN/cluster/FleetStatus.kt"
 
 echo
 TOTAL=$((PASS + FAIL))

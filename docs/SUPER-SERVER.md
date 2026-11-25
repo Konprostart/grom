@@ -140,6 +140,10 @@ export BASE=http://127.0.0.1:47002
 # health — no credential, no secrets
 curl -s "$BASE/v1/health"
 
+# connect — what a client needs before it owns a credential (D91).
+# It lists no service until a credential is presented.
+curl -s "$BASE/grom/v1/connect"
+
 # login (BOTH or PASSWORD mode)
 curl -s -X POST "$BASE/v1/auth/login" \
   -H 'Content-Type: application/json' \
@@ -153,6 +157,10 @@ export TOKEN=$(curl -s -X POST "$BASE/v1/auth/login" \
 # status and plugin inventory
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status"
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/plugins"
+
+# the same connect document, now with this caller's capabilities and the
+# service list (D91)
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/grom/v1/connect"
 
 # the device's own invite record (D50) is part of that status document
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/status" | grep -o '"referral":{[^}]*}'
@@ -193,6 +201,15 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" "$BASE/v1/auth/logout"
 With `bind=LAN` or `PUBLIC`, use the address the status document reports instead
 of `127.0.0.1`. On an Android device you can reach a loopback listener through
 `adb forward tcp:47002 tcp:47002`.
+
+A third-party application does not use an operator token at all. It is a
+**scoped client** (D92): the operator trusts its public key under **Devices →
+Trust a key** and grants `services.read` and/or `services.call`. With
+`services.call` it may invoke only the operations the service publishes in
+`scopedOps` — for the `agent` service that is `echo`, `kv.get`, `kv.put` and
+`ping`; the Lightning adapter publishes none. The full contract, including the
+discovery document and the error table, is
+[`specs/S6-client-connect.md`](specs/S6-client-connect.md).
 
 ## 4. Signing requests with Ed25519
 

@@ -1697,3 +1697,19 @@ If, at the end of Phase 2, "Grom hosts my application and tells me the truth abo
 it" is true on a real phone, the plan is working. If any part of that sentence
 needs a caveat the UI does not show, the feature goes back a phase. That is the
 only success metric this document treats as binding.
+
+### M.8 Client connect: applications are clients, not nodes
+
+M.5 is discovery *between Grom nodes*, and it still does not authenticate. A
+third-party application needs a different thing: a **contract** discovery, not a
+network beacon. `GET /grom/v1/connect` (D91, S6) is that document — schema, data
+API, auth methods, scopes, the measured endpoint and the route map — and it is
+served only when the operator has enabled the public data plane. There is still
+no cloud directory, no registration and no multicast: the client is given an
+address by its operator, exactly like every other Grom consumer.
+
+Permission is scoped, never ambient (D92). An application is a peer with
+`services.read`/`services.call`; it may enumerate services and invoke the ops
+each one publishes in `scopedOps`, and it is never an operator. This keeps the
+"one server, many clients" goal from quietly becoming "one operator key, many
+apps".

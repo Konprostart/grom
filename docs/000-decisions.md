@@ -1460,3 +1460,69 @@ fails when a code exists in the code but not in the guide.
 
 *Enforced by:* `EmbedHealthTest`, `GromEmbedStartCodeTest`, `tools/test-policy`
 #52, #54.
+
+## D91 — a client discovers Grom through one data-plane document
+**ACCEPTED.** An application that wants to use Grom as a local server had to read
+three endpoints and guess the rest: `/v1/health` says a server exists,
+`/v1/status` needs a credential, and `/v1/plugins` needs an *operator* credential
+it should never have. `GET /grom/v1/connect` is now the one document a client
+reads first (S6).
+
+The document is anonymous on the base level — schema, api, versions, auth
+methods, scopes, the measured data-plane endpoint and the route map — and adds
+the caller's capabilities and the service list only when a valid credential is
+presented. A presented but invalid credential is refused with `401`; it is never
+downgraded to the anonymous answer, because a host must not read "my key was
+revoked" as "this server has no services". The anonymous document lists no
+service at all: knowing that Grom exists is not knowing how it is configured.
+
+`/v1/health` is untouched. The new route lives under the `/grom/v1/` namespace
+the project already uses for its own contract, on the data plane, and the
+`/v1/*` paths every existing client speaks are unchanged.
+
+*Enforced by:* `ConnectRouterTest`, `GromConnectClientTest`, `tools/test-policy`
+#56, #59.
+
+## D92 — a connected app gets services, never an operator key
+**ACCEPTED.** `status.read` and `config.read` let a client read; they did not let
+it *use* a service, and the only alternative was handing it an operator key,
+which would also unlock the audit surface, the event stream, logout and the
+Lightning adapter. Two scopes are added: `services.read` (enumerate services,
+descriptions, capabilities, `scopedOps`) and `services.call` (invoke an op the
+service publishes).
+
+The route-level scope is not enough, because a service knows its own semantics.
+`Plugin.scopedOps()` is the per-service allow-list of callable operations; its
+default is **empty**, so a plugin that forgets to declare it exposes nothing. The
+op check runs after authentication and before `rpc`, so `services.call` can never
+widen into "anything a service can do". `AgentPlugin` publishes `echo`,
+`kv.get`, `kv.put`, `ping` and withholds `status` (the host's projects, bridge,
+notifications and fleet block are a `status.read` surface). `LightningPlugin`
+publishes nothing: it can move funds, and a money permission must never be a
+side effect of a service grant.
+
+Listing a service does not imply its status: the `status` block appears only for
+a caller that also holds `status.read`. A connected app is never an operator.
+
+*Enforced by:* `ConnectRouterTest`, `ClusterRouterTest`, `tools/test-policy` #57.
+
+## D93 — the client SDK is thin, signer-injected and pinned to one signature
+**ACCEPTED.** Integrators were told to re-derive the canonical signature string,
+the nonce alphabet and the error envelope by reading S5. That is how a client and
+a server drift into two incompatible formats. `app.grom.sdk.connect` now carries
+the reference HTTP client (S6), with no dependency beyond `HttpURLConnection` and
+a small purpose-built JSON reader/writer.
+
+Three rules make it honest. It **never holds a private key**: a host that uses
+Ed25519 supplies a `GromSigner`, so key material stays in the host's Keystore
+store (D72). Its `canonicalString` is compared byte-for-byte with the server's
+`RequestSigner.canonicalString` by a test, so the two cannot drift silently. And
+the example (`examples/connect`) is a compiled module with its own test, not a
+snippet in a document that rots.
+
+MCP, WebSocket and dynamic plugin loading stay out: the existing HTTP/JSON RPC
+already describes and calls a service, and a second protocol would be a second
+thing to keep secure.
+
+*Enforced by:* `GromConnectClientTest`, `GromJsonTest`, `ConnectExampleTest`,
+`ConnectRouterTest` (parity), `tools/test-policy` #58.

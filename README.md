@@ -19,10 +19,11 @@ grom/
 │   ├── src/peripheral26/   the peripheral role (no socket, no service)
 │   └── src/test/           JVM tests for all policy logic
 ├── agent/                  grom-agent.js, the supervised Node agent
-├── sdk/                    app.grom.sdk + AIDL app.grom.sdk.ipc
+├── sdk/                    app.grom.sdk (AIDL) + app.grom.sdk.connect (HTTP client)
+├── examples/connect/       the compiled Kotlin client example (S6)
 ├── testapps/               samecert / foreigncert — the C-008 evidence
 ├── web/                    the static download page (GitHub Pages, D49)
-├── docs/                   000-decisions, specs S1–S5, F1 plan, master plan, roadmap, guides
+├── docs/                   000-decisions, specs S1–S6, F1 plan, master plan, roadmap, guides
 ├── tools/                  gates, plus grom-fleet, grom-hub and grom-provision
 ├── scripts/                test keys and the arm64 Node runtime pipeline
 ├── third_party/            the dependency ledger
@@ -323,6 +324,42 @@ configuring the public data plane through the Binder (D86), the ~38 MB runtime
 and the peripheral build that ships none of it (D87), the Android 12+
 foreground-service rules, the battery exemption, and what happens when the
 operator also has the standalone Grom installed.
+
+## Using Grom from another app (client connect)
+
+Another application does not need the AIDL surface — and must not be given an
+operator key. It connects to the public data plane over the same HTTP/JSON the
+project already speaks:
+
+```
+GET  /grom/v1/connect        → schema, api, auth methods, scopes, endpoint map
+POST /v1/auth/login          → password  → session token
+   or Ed25519-signed requests → the app's own key, trusted on the phone
+GET  /v1/plugins             → services, capabilities, scopedOps   (services.read)
+POST /v1/plugins/{id}/rpc    → one op the service publishes        (services.call)
+GET  /v1/status              → measured status                     (status.read)
+```
+
+The discovery document is anonymous on the base level and adds the service list
+only for a valid credential; an invalid credential is `401`, never a silent
+downgrade. A client is never an operator, and `services.call` reaches only the
+operations a service lists in `scopedOps` — the Lightning adapter lists none.
+
+The thin, dependency-free client lives in `:sdk`:
+
+```kotlin
+val client = GromConnectClient("http://127.0.0.1:47002")
+val info = client.connect()                       // D91
+if (!info.supports()) return show("Grom is newer: ${info.gromVersion}")
+val session = client.session(client.login(password).token)
+for (service in client.services(session)) {        // services.read
+    println("${service.id}: ${service.scopedOps}")
+}
+val answer = client.rpc(session, "agent", "kv.put", mapOf("key" to "k", "value" to "v"))
+```
+
+Full contract: [`docs/specs/S6-client-connect.md`](docs/specs/S6-client-connect.md).
+Working example: `examples/connect` (compiled and tested in the gates).
 
 ## How Grom works
 
