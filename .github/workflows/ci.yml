@@ -66,10 +66,12 @@ jobs:
             :testapps:samecert:assembleDebug \
             :testapps:foreigncert:assembleDebug
 
-      - name: JVM tests (engine, server29 and peripheral26)
+      - name: JVM tests (engine, sdk, the client example and both flavours)
         run: |
           gradle --no-daemon --stacktrace \
             :engine:testDebugUnitTest \
+            :sdk:testDebugUnitTest \
+            :examples:connect:testDebugUnitTest \
             :app:testServer29DebugUnitTest \
             :app:testPeripheral26DebugUnitTest
 
@@ -104,6 +106,7 @@ jobs:
             app/build/reports/tests/
             engine/build/reports/tests/
             sdk/build/reports/tests/
+            examples/connect/build/reports/tests/
             app/build/reports/lint-results-*.html
             engine/build/reports/lint-results-*.html
           if-no-files-found: warn
