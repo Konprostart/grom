@@ -254,7 +254,7 @@ class SuperRouter(
         @Suppress("UNCHECKED_CAST")
         val args = rawArgs as Map<String, Any?>
 
-        return when (val result = plugin.rpc(op, args)) {
+        return when (val result = plugin.rpc(op, args, principal)) {
             is PluginResult.Ok -> json(
                 200,
                 mapOf(

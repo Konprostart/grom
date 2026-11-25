@@ -56,4 +56,19 @@ interface Plugin {
     fun status(): Map<String, Any?>
 
     fun rpc(op: String, args: Map<String, Any?>): PluginResult
+
+    /**
+     * Caller-aware [rpc] (D92, extended for scoped storage).
+     *
+     * The router passes the authenticated principal so a plugin that needs
+     * per-credential isolation (for example the scoped key/value store) can
+     * namespace its data by the caller instead of trusting the request body.
+     *
+     * The default keeps every existing plugin unchanged: it delegates to the
+     * two-argument [rpc] and ignores the caller, exactly as before this
+     * overload existed. Plugins that must not be callable without a caller
+     * override this and refuse a `null` principal.
+     */
+    fun rpc(op: String, args: Map<String, Any?>, caller: SuperAuth.Principal?): PluginResult =
+        rpc(op, args)
 }

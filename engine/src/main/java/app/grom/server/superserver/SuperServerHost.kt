@@ -17,6 +17,8 @@ import app.grom.server.superserver.auth.SessionStore
 import app.grom.server.superserver.plugins.lightning.LightningBackend
 import app.grom.server.superserver.plugins.lightning.LightningBackendFactory
 import app.grom.server.superserver.plugins.lightning.LightningPlugin
+import app.grom.server.superserver.plugins.storage.ScopedStorageStore
+import app.grom.server.superserver.plugins.storage.StoragePlugin
 import java.io.File
 
 /**
@@ -282,6 +284,7 @@ class SuperServerHost(
         }
 
         val backend = buildBackend(loaded)
+        val scopedStorage = ScopedStorageStore(File(File(appContext.filesDir, "grom"), ScopedStorageStore.FILE_NAME))
         val pluginRegistry = PluginRegistry(
             listOf(
                 AgentPlugin(agentHealth, agentExec) {
@@ -299,7 +302,8 @@ class SuperServerHost(
                         "fleet" to fleet()
                     )
                 },
-                LightningPlugin(backend, loaded.lightning.kind.wireName, backendError)
+                LightningPlugin(backend, loaded.lightning.kind.wireName, backendError),
+                StoragePlugin(scopedStorage)
             )
         )
 
