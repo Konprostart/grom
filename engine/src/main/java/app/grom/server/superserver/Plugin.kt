@@ -40,6 +40,18 @@ interface Plugin {
     /** Capabilities the plugin can currently serve, e.g. `status`. */
     fun capabilities(): Set<String>
 
+    /**
+     * The operations a client holding `services.call` may invoke (D92).
+     *
+     * Empty means the service is operator-only, which is the safe default: a
+     * plugin that forgets to declare this exposes nothing to a connected app.
+     * Sensitive operations — reading the full status, changing configuration,
+     * moving funds — MUST stay out of this set, because the route-level scope
+     * only says "this caller may use services", not "this caller may do
+     * anything a service can do".
+     */
+    fun scopedOps(): Set<String> = emptySet()
+
     /** Side-effect-free snapshot for `/v1/plugins`. Contains no secrets. */
     fun status(): Map<String, Any?>
 

@@ -32,6 +32,14 @@ class AgentPlugin(
 
     override fun capabilities(): Set<String> = AgentChannel.OPS + "status" + "health"
 
+    /**
+     * A connected app may use the agent's own key/value store and the echo
+     * probe (D92). `status` stays out: it carries the host's projects, bridge,
+     * notifications and fleet block, which is a `status.read` surface, not a
+     * service call. `health` stays out as well — that is the operator's lamp.
+     */
+    override fun scopedOps(): Set<String> = AgentChannel.OPS - "status"
+
     /** `status` is the agent health plus the host's reference block; `health` stays pure. */
     override fun status(): Map<String, Any?> = health() + statusExtra()
 

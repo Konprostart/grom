@@ -7,6 +7,7 @@ import app.grom.server.core.Token
 import app.grom.server.http.HttpRequest
 import app.grom.server.http.Json
 import app.grom.server.http.JsonParser
+import app.grom.server.superserver.auth.RequestSigner
 import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.TimeUnit
@@ -55,6 +56,20 @@ class SuperRouter(
     private val pairing: PairingPort = PairingPort.DISABLED,
     /** The sanitised hand-off document served at `GET /v1/config` (D53). */
     private val configExport: () -> String = { "{}" },
+    /** The host APK's version, reported by `GET /grom/v1/connect` (D91). */
+    private val gromVersion: () -> String = { "unknown" },
+    /**
+     * The measured data-plane endpoint, read at request time. A bind that has
+     * not happened is reported as such; the route never invents an address.
+     */
+    private val dataPlane: () -> Map<String, Any?> = {
+        mapOf(
+            "enabled" to config.enabled,
+            "running" to true,
+            "bind" to config.bind.name,
+            "port" to config.port
+        )
+    },
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
 
@@ -89,6 +104,23 @@ class SuperRouter(
                 200,
                 mapOf("ok" to true, "token" to result.token, "expiresAtMs" to result.expiresAtMs)
             )
+        }
+
+        // Connect is the one document a client needs before it owns a
+        // credential (D91). It is answered without one, but it is not a bypass:
+        // a presented credential is verified, and an invalid one gets the same
+        // uniform 401 as every other authenticated route. The unauthenticated
+        // document deliberately lists no service, so it cannot be used to
+        // enumerate configuration.
+        if (path == CONNECT) {
+            if (request.method != "GET") return methodNotAllowed(request.method, "GET")
+            if (!hasCredential(request)) return json(200, connectDocument(null))
+            return when (
+                val outcome = auth.authenticate(request.method, path, request.body, request::header)
+            ) {
+                is SuperAuth.Outcome.Rejected -> rejected(outcome)
+                is SuperAuth.Outcome.Authenticated -> json(200, connectDocument(outcome.principal))
+            }
         }
 
         // Pairing is the only pre-authenticated surface, and only while a
@@ -127,9 +159,17 @@ class SuperRouter(
             }
 
             path == PLUGINS -> {
-                if (principal !is SuperAuth.Principal.Operator) return scopeRequired()
+                if (!canReadServices(principal)) return scopeRequired()
                 if (request.method != "GET") return methodNotAllowed(request.method, "GET")
-                json(200, mapOf("ok" to true, "plugins" to plugins.all().map(::describe)))
+                json(
+                    200,
+                    mapOf(
+                        "ok" to true,
+                        "plugins" to plugins.all().map {
+                            describe(it, includeStatus = hasStatusRead(principal))
+                        }
+                    )
+                )
             }
 
             path == EVENTS -> {
@@ -138,10 +178,7 @@ class SuperRouter(
                 eventStream()
             }
 
-            path.startsWith("$PLUGINS/") -> {
-                if (principal !is SuperAuth.Principal.Operator) return scopeRequired()
-                pluginRoute(path, request)
-            }
+            path.startsWith("$PLUGINS/") -> pluginRoute(path, request, principal)
 
             else -> error(404, "NOT_FOUND", "no such endpoint")
         }
@@ -170,7 +207,11 @@ class SuperRouter(
         return json(answer.status, answer.payload)
     }
 
-    private fun pluginRoute(path: String, request: HttpRequest): SuperResponse {
+    private fun pluginRoute(
+        path: String,
+        request: HttpRequest,
+        principal: SuperAuth.Principal
+    ): SuperResponse {
         val parts = path.removePrefix("$PLUGINS/").split("/")
         if (parts.isEmpty() || parts[0].isEmpty()) return error(404, "NOT_FOUND", "no such endpoint")
 
@@ -178,13 +219,18 @@ class SuperRouter(
             ?: return error(404, "UNKNOWN_PLUGIN", "no plugin with that id")
 
         if (parts.size == 1) {
+            if (!canReadServices(principal)) return scopeRequired()
             if (request.method != "GET") return methodNotAllowed(request.method, "GET")
-            return json(200, mapOf("ok" to true) + describe(plugin))
+            return json(
+                200,
+                mapOf("ok" to true) + describe(plugin, includeStatus = hasStatusRead(principal))
+            )
         }
 
         if (parts.size != 2 || parts[1] != "rpc") {
             return error(404, "NOT_FOUND", "no such endpoint")
         }
+        if (!canCallServices(principal)) return scopeRequired()
         if (request.method != "POST") return methodNotAllowed(request.method, "POST")
         if (!isJson(request)) return unsupportedMediaType()
         if (oversized(request)) return tooLarge()
@@ -194,6 +240,14 @@ class SuperRouter(
         val op = parsed["op"] as? String
             ?: return badRequest("missing field: op")
         if (op.isEmpty() || op.length > 64) return badRequest("invalid field: op")
+
+        // Op-level, not route-level (D92). `services.call` says the client may
+        // use services; it never says it may do anything a service can do. A
+        // plugin declares the ops it exposes to a scoped caller, and the empty
+        // default means an operator-only service.
+        if (principal !is SuperAuth.Principal.Operator && op !in plugin.scopedOps()) {
+            return scopeRequired()
+        }
 
         val rawArgs = parsed["args"] ?: emptyMap<String, Any?>()
         if (rawArgs !is Map<*, *>) return badRequest("field args must be an object")
@@ -271,19 +325,104 @@ class SuperRouter(
             "uptimeMs" to uptimeMs(),
             "auth" to config.auth.name,
             "bind" to config.bind.name,
-            "plugins" to plugins.all().map(::describe)
+            "plugins" to plugins.all().map { describe(it, includeStatus = true) }
         )
         base.putAll(serverStatus())
         return base
     }
 
-    private fun describe(plugin: Plugin): Map<String, Any?> = mapOf(
-        "id" to plugin.id,
-        "title" to plugin.title,
-        "description" to plugin.description,
-        "capabilities" to plugin.capabilities().sorted(),
-        "status" to plugin.status()
-    )
+    /**
+     * One service, as a discovery document describes it (D91, D92).
+     *
+     * [includeStatus] is the caller's `status.read`, not a property of the
+     * listing: a principal that may enumerate services does not automatically
+     * get the measured state of every one of them. `scopedOps` is always
+     * present because it is the callable surface, not a secret.
+     */
+    private fun describe(plugin: Plugin, includeStatus: Boolean): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "id" to plugin.id,
+            "title" to plugin.title,
+            "description" to plugin.description,
+            "capabilities" to plugin.capabilities().sorted(),
+            "scopedOps" to plugin.scopedOps().sorted()
+        ).apply {
+            if (includeStatus) put("status", plugin.status())
+        }
+
+    /**
+     * The connect document (D91). This is the only document served before a
+     * credential exists, so it is held to the same rule as `/v1/health`: it
+     * publishes what a client needs in order to connect, and nothing about how
+     * this device is configured. The service list is added only for a
+     * principal that may read it; the anonymous answer says so explicitly with
+     * `listed: false` instead of an empty list that looks like "no services".
+     */
+    private fun connectDocument(principal: SuperAuth.Principal?): Map<String, Any?> {
+        val capabilities = when (principal) {
+            null -> emptyList()
+            is SuperAuth.Principal.Operator -> PeerScope.entries.map { it.wireName }.sorted()
+            is SuperAuth.Principal.Peer -> PeerScope.wireNames(principal.scopes)
+        }
+        val listed = canReadServicesOrNull(principal)
+        return linkedMapOf(
+            "ok" to true,
+            "schema" to CONNECT_SCHEMA,
+            "service" to SERVICE,
+            "grom" to gromVersion(),
+            "api" to API_VERSION,
+            "compat" to linkedMapOf(
+                "minApi" to API_VERSION,
+                "maxApi" to API_VERSION,
+                "signature" to SIGNATURE_SCHEME,
+                "keyHeader" to RequestSigner.HEADER_KEY,
+                "timestampHeader" to RequestSigner.HEADER_TIMESTAMP,
+                "nonceHeader" to RequestSigner.HEADER_NONCE,
+                "signatureHeader" to RequestSigner.HEADER_SIGNATURE
+            ),
+            "state" to "ready",
+            "timeMs" to clock(),
+            "dataPlane" to dataPlane(),
+            "auth" to linkedMapOf(
+                "methods" to authMethods(),
+                "scopes" to PeerScope.entries.map { it.wireName }.sorted(),
+                "login" to LOGIN
+            ),
+            "principal" to when (principal) {
+                null -> mapOf<String, Any?>("kind" to "anonymous")
+                is SuperAuth.Principal.Operator -> mapOf<String, Any?>("kind" to "operator")
+                is SuperAuth.Principal.Peer -> mapOf<String, Any?>(
+                    "kind" to "peer",
+                    "nodeId" to principal.nodeId
+                )
+            },
+            "capabilities" to capabilities,
+            "services" to linkedMapOf(
+                "listed" to listed,
+                "path" to PLUGINS,
+                "requires" to PeerScope.SERVICES_READ.wireName,
+                "items" to if (listed) {
+                    plugins.all().map {
+                        describe(it, includeStatus = hasStatusReadOrNull(principal))
+                    }
+                } else {
+                    emptyList<Any?>()
+                }
+            ),
+            "endpoints" to ENDPOINTS
+        )
+    }
+
+    /** `password` only when a hash is stored, `key` only when key auth is live. */
+    private fun authMethods(): List<String> = buildList {
+        if (auth.passwordEnabled()) add("password")
+        if (config.auth != AuthMode.PASSWORD) add("key")
+    }
+
+    private fun hasCredential(request: HttpRequest): Boolean =
+        request.header("authorization") != null ||
+            request.header("x-grom-token") != null ||
+            request.header(RequestSigner.HEADER_KEY) != null
 
     // ----------------------------------------------------------------- helpers
 
@@ -326,6 +465,23 @@ class SuperRouter(
             is SuperAuth.Principal.Peer -> principal.scopes.contains(scope)
         }
 
+    private fun hasStatusRead(principal: SuperAuth.Principal): Boolean =
+        hasScope(principal, PeerScope.STATUS_READ)
+
+    private fun hasStatusReadOrNull(principal: SuperAuth.Principal?): Boolean =
+        principal != null && hasScope(principal, PeerScope.STATUS_READ)
+
+    /** `services.read`: enumerate services. Operator keys have it by definition. */
+    private fun canReadServices(principal: SuperAuth.Principal): Boolean =
+        hasScope(principal, PeerScope.SERVICES_READ)
+
+    private fun canReadServicesOrNull(principal: SuperAuth.Principal?): Boolean =
+        principal != null && hasScope(principal, PeerScope.SERVICES_READ)
+
+    /** `services.call`: invoke the operations a service exposes to scoped clients. */
+    private fun canCallServices(principal: SuperAuth.Principal): Boolean =
+        hasScope(principal, PeerScope.SERVICES_CALL)
+
     private fun scopeRequired(): SuperResponse.Json =
         error(403, "SCOPE_REQUIRED", "this credential does not allow that")
 
@@ -357,6 +513,16 @@ class SuperRouter(
         const val SERVICE: String = "grom-super"
         const val API_VERSION: Int = 1
 
+        /**
+         * The discovery document a client reads before it owns a credential
+         * (D91). It lives under the `/grom/v1/` namespace the project already
+         * uses for its own contract, while the rest of the data plane keeps
+         * the `/v1/` paths every existing client already speaks.
+         */
+        const val CONNECT: String = "/grom/v1/connect"
+        const val CONNECT_SCHEMA: String = "grom-connect-v1"
+        const val SIGNATURE_SCHEME: String = "grom-ed25519-v1"
+
         const val HEALTH: String = "/v1/health"
         const val LOGIN: String = "/v1/auth/login"
         const val LOGOUT: String = "/v1/auth/logout"
@@ -367,6 +533,18 @@ class SuperRouter(
         const val PAIR_IDENTITY: String = "/v1/pair/identity"
         const val PAIR_HELLO: String = "/v1/pair/hello"
         const val PAIR_POLL: String = "/v1/pair/poll"
+
+        /** The route map a client discovers; it never has to guess a path. */
+        private val ENDPOINTS: Map<String, String> = linkedMapOf(
+            "connect" to CONNECT,
+            "health" to HEALTH,
+            "login" to LOGIN,
+            "logout" to LOGOUT,
+            "status" to STATUS,
+            "config" to CONFIG,
+            "plugins" to PLUGINS,
+            "events" to EVENTS
+        )
 
         private const val HEARTBEAT_MS: Long = 15_000
         private const val MAX_STREAM_MS: Long = 30L * 60 * 1000

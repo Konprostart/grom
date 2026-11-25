@@ -192,7 +192,8 @@ class ServerRuntime(
             principalOf = { keyId -> fleet.principalOf(keyId) },
             peerKeys = { fleet.peerKeys() },
             doctor = { doctorStatusBlock() },
-            configExport = { configExportJson() }
+            configExport = { configExportJson() },
+            version = { hostVersion(context) }
         )
     }
 

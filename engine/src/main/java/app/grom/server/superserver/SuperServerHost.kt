@@ -63,7 +63,13 @@ class SuperServerHost(
      */
     private val doctor: () -> Map<String, Any?> = { emptyMap() },
     /** The sanitised hand-off document served at `GET /v1/config` (D53). */
-    private val configExport: () -> String = { "{}" }
+    private val configExport: () -> String = { "{}" },
+    /**
+     * The version of the APK that hosts this engine (D91). Injected rather than
+     * read from the package manager here, so the host class stays testable and
+     * the `connect` document never reports a version the build did not stamp.
+     */
+    private val version: () -> String = { "unknown" }
 ) {
 
     private val lock = Any()
@@ -325,6 +331,20 @@ class SuperServerHost(
             },
             pairing = pairing,
             configExport = configExport,
+            gromVersion = version,
+            dataPlane = {
+                // Read at request time: the accept socket is assigned after
+                // this lambda is built, and a stopped plane must never answer
+                // with the address it used to have.
+                linkedMapOf(
+                    "enabled" to config.enabled,
+                    "running" to (server?.isRunning() == true),
+                    "bind" to config.bind.name,
+                    "address" to (server?.address ?: "not bound"),
+                    "port" to config.port,
+                    "maxBodyBytes" to config.maxBodyBytes
+                )
+            },
             serverStatus = {
                 mapOf(
                     "address" to (server?.address ?: "not bound"),

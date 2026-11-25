@@ -40,6 +40,14 @@ class LightningPlugin(
     override fun capabilities(): Set<String> =
         backend?.capabilities()?.map { it.wireName }?.toSet() ?: emptySet()
 
+    /**
+     * No scoped operations (D92). This adapter can create invoices, pay them,
+     * hold and release escrow, and read balances; granting that to a connected
+     * app would be a money permission, not a service permission. A `services.
+     * call` credential therefore gets `403 SCOPE_REQUIRED` for every op here.
+     */
+    override fun scopedOps(): Set<String> = emptySet()
+
     override fun status(): Map<String, Any?> = mapOf(
         "configured" to (backend != null),
         "backend" to (backend?.name ?: configuredKind),

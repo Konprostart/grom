@@ -5,16 +5,29 @@ import app.grom.server.superserver.auth.Ed25519
 import java.util.Base64
 
 /**
- * What one paired device may read from this one (D73).
+ * What one connected client may do on this device (D73, D92).
  *
- * Scopes are granted per pairing, not per device and never implicitly: a peer
- * that was paired for `status.read` cannot read the configuration just because
- * it knows the URL. Unknown scope names are refused rather than ignored, so a
- * typo cannot quietly widen a grant.
+ * Scopes are granted explicitly and never implicitly: a peer that was granted
+ * `status.read` cannot read the configuration just because it knows the URL.
+ * Unknown scope names are refused rather than ignored, so a typo cannot quietly
+ * widen a grant.
+ *
+ * `services.read` and `services.call` exist for applications that use Grom as a
+ * local server (D92). They are deliberately narrower than an operator key: a
+ * caller with `services.call` may only invoke the operations a plugin lists in
+ * [app.grom.server.superserver.Plugin.scopedOps], which never include status,
+ * credentials, configuration or anything that moves funds. A connected app is
+ * never an operator.
  */
 enum class PeerScope(val wireName: String) {
     STATUS_READ("status.read"),
-    CONFIG_READ("config.read");
+    CONFIG_READ("config.read"),
+
+    /** Enumerate services, their descriptions and their capabilities. */
+    SERVICES_READ("services.read"),
+
+    /** Invoke the operations a service explicitly exposes to scoped clients. */
+    SERVICES_CALL("services.call");
 
     companion object {
 
